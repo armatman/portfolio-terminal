@@ -172,4 +172,53 @@
           <!-- Add Cash Stock Row -->
           <div class="bg-slate-900/40 p-2.5 rounded border border-slate-800/80 flex flex-wrap items-center gap-2 pt-2">
             <input type="text" id="newCashTicker" placeholder="Ticker (e.g. AAPL)" class="bg-slate-950 border border-slate-700 text-xs px-2.5 py-1.5 rounded text-white w-28 uppercase">
-            <input type="number" id="newCashShares
+            <input type="number" id="newCashShares" placeholder="Shares" class="bg-slate-950 border border-slate-700 text-xs px-2.5 py-1.5 rounded text-white w-24 text-right">
+            <input type="number" id="newCashPrice" step="0.01" placeholder="Price (Optional - auto-fetches)" class="bg-slate-950 border border-slate-700 text-xs px-2.5 py-1.5 rounded text-white w-48 text-right">
+            <button onclick="addCashStockFromUI()" class="bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold px-3 py-1.5 rounded transition">
+              + Add Cash Holding
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Conversational Terminal Box -->
+    <div class="border-card p-4 rounded-lg space-y-3">
+      <div class="text-xs font-bold text-slate-400 uppercase tracking-wider flex justify-between items-center">
+        <span>Trading Console (Deterministic Engine + Gemini AI)</span>
+        <span id="aiStatus" class="text-slate-500 text-[10px]">READY</span>
+      </div>
+      
+      <div id="terminalLog" class="h-64 overflow-y-auto bg-slate-950 p-3 rounded text-xs space-y-2 border border-slate-800/80">
+        <div class="text-slate-500">[System]: Ready. GitHub Gist cloud synchronization active.</div>
+      </div>
+
+      <div class="flex gap-2">
+        <input id="cmdInput" type="text" placeholder="e.g. bought 20 JBL for 290, pt 305 | add cash stock 50 AAPL | b: -5000" 
+               class="flex-1 bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-emerald-500 text-white"
+               onkeydown="if(event.key==='Enter') executeCommand()">
+        <button onclick="executeCommand()" class="bg-emerald-600 hover:bg-emerald-500 text-black text-xs font-bold px-4 py-2 rounded transition">
+          Send
+        </button>
+      </div>
+
+      <!-- Quick Commands Reference -->
+      <div class="pt-3 mt-3 border-t border-slate-800">
+        <p class="text-[10px] text-slate-500 uppercase tracking-wider mb-2 font-bold">Quick Commands Guide</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2 text-xs text-slate-400">
+          <div><span class="text-emerald-400 font-bold">Buy Shares:</span> bought 20 JBL for 290, pt 305</div>
+          <div><span class="text-cyan-400 font-bold">Cash Stock (Auto-price):</span> add cash stock 50 AAPL <span class="text-slate-600 italic">or</span> remove cash stock AAPL</div>
+          <div><span class="text-cyan-400 font-bold">Free Cash:</span> free cash 5000 <span class="text-slate-600 italic">or</span> cash 3500</div>
+          <div><span class="text-purple-400 font-bold">Ladder Exit:</span> sell 10 JBL for 305 today and 10 for 315 in 7 days</div>
+          <div><span class="text-cyan-400 font-bold">Exit Comparison:</span> sell today for 300 vs sell 10 days later for 310</div>
+          <div><span class="text-amber-400 font-bold">Live Market Quote:</span> quote JBL <span class="text-slate-600 italic">or</span> what's the current JBL price?</div>
+          <div><span class="text-emerald-400 font-bold">Sync Margin Debt:</span> b: -5000</div>
+          <div><span class="text-rose-400 font-bold">Close Position:</span> sold all JBL for 305</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>
