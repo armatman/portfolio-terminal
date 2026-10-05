@@ -47,8 +47,12 @@
                title="GitHub Personal Access Token with 'gist' scope"
                class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-purple-500 w-36 text-slate-200">
 
-        <button onclick="saveApiKeys()" class="bg-emerald-600 hover:bg-emerald-500 text-black text-xs font-bold px-3 py-2 rounded transition">
+        <button onclick="saveApiKeys()" class="bg-emerald-600 hover:bg-emerald-500 text-black text-xs font-bold px-3 py-2 rounded transition" title="Save keys and pull latest cloud state">
           Save Keys
+        </button>
+
+        <button onclick="pullCloudAndRewriteLocal()" class="bg-slate-800 hover:bg-slate-700 border border-purple-600 text-purple-300 text-xs font-bold px-3 py-2 rounded transition flex items-center gap-1" title="Force pull cloud data and rewrite local storage">
+          <span>☁↓</span> Pull
         </button>
 
         <button onclick="refreshAllLivePrices()" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-cyan-300 text-xs font-bold px-3 py-2 rounded transition flex items-center gap-1">
@@ -357,6 +361,7 @@
       }
     }
 
+    // PULL & REWRITE: Cloud data always overwrites local data and localStorage
     async function pullStateFromGistOnLoad() {
       const gistId = extractCleanGistId(localStorage.getItem('github_gist_id'));
       const token = (localStorage.getItem('github_pat_token') || '').trim();
@@ -381,26 +386,55 @@
         let parsedEnvelope = null;
         try { parsedEnvelope = JSON.parse(targetFile.content); } catch (e) {}
 
-        if (parsedEnvelope && parsedEnvelope.payload && typeof parsedEnvelope.payload === 'string') {
-          remoteState = decodePayload(parsedEnvelope.payload);
-        } else if (parsedEnvelope && typeof parsedEnvelope === 'object' && parsedEnvelope.positions) {
-          remoteState = parsedEnvelope;
+        if (parsedEnvelope) {
+          if (parsedEnvelope.payload && typeof parsedEnvelope.payload === 'string') {
+            try {
+              remoteState = decodePayload(parsedEnvelope.payload);
+            } catch (decErr) {
+              try { remoteState = JSON.parse(atob(parsedEnvelope.payload)); } catch (e2) {}
+            }
+          } else if (typeof parsedEnvelope === 'object') {
+            remoteState = parsedEnvelope;
+          }
         }
 
-        if (remoteState && typeof remoteState === 'object' && remoteState.positions) {
+        if (remoteState && typeof remoteState === 'object') {
+          // Normalise schema
+          if (!remoteState.positions || typeof remoteState.positions !== 'object') remoteState.positions = {};
+          if (remoteState.marginBalance === undefined) remoteState.marginBalance = 0.00;
+          if (!remoteState.cashCushion) remoteState.cashCushion = { freeCash: 0.00, holdings: [] };
+          if (!remoteState.startDate) remoteState.startDate = new Date().toISOString().split('T')[0];
+          
+          // Rewrite memory state
           state = remoteState;
-          if (!state.cashCushion) state.cashCushion = { freeCash: 0.00, holdings: [] };
-          if (!state.positions) state.positions = {};
+
+          // Rewrite local storage with the cloud state
           localStorage.setItem('margin_portfolio_state_dynamic_v2', JSON.stringify(state));
+
           setGistStatus('synced', 'ONLINE');
-          logTerminal("[Gist]: Successfully decrypted and loaded remote state.");
+          logTerminal("[Gist]: Cloud data successfully loaded. Local storage rewritten with remote state.");
           return true;
+        } else {
+          throw new Error("Invalid remote payload structure");
         }
       } catch (e) {
         logTerminal(`[Gist Notice]: Could not pull remote Gist (${e.message}). Falling back to local cache.`);
         setGistStatus('error', 'OFFLINE');
       }
       return false;
+    }
+
+    async function pullCloudAndRewriteLocal() {
+      logTerminal("[System]: Fetching cloud data from GitHub Gist...");
+      const success = await pullStateFromGistOnLoad();
+      if (success) {
+        verifyTradernetRulesOnload();
+        applyOvernightRollover();
+        renderBoard();
+        logTerminal("[System]: Local data rewritten with cloud state successfully.");
+      } else {
+        logTerminal("[Error]: Failed to pull cloud data. Check Gist ID / Token.");
+      }
     }
 
     async function loadSavedState() {
@@ -416,8 +450,10 @@
       const savedToken = localStorage.getItem('github_pat_token');
       if (savedToken) document.getElementById('githubTokenInput').value = savedToken;
 
+      // On load: Pull cloud data first. If present, it rewrites local storage.
       const pulled = await pullStateFromGistOnLoad();
       if (!pulled) {
+        // Fall back to local data only if cloud is unreachable or unconfigured
         const saved = localStorage.getItem('margin_portfolio_state_dynamic_v2');
         if (saved) {
           try {
@@ -453,7 +489,7 @@
       }
     }
 
-    function saveApiKeys() {
+    async function saveApiKeys() {
       const gKey = document.getElementById('apiKeyInput').value.trim();
       localStorage.setItem('gemini_api_key', gKey);
 
@@ -468,8 +504,10 @@
       localStorage.setItem('github_pat_token', token);
 
       logTerminal("[System]: Credentials saved.");
-      if (cleanGistId && token) {
-        pushStateToGist(true);
+      
+      // Pull and rewrite local data with cloud data immediately if Gist is set
+      if (cleanGistId) {
+        await pullCloudAndRewriteLocal();
       }
     }
 
@@ -1469,6 +1507,11 @@
       
       logTerminal(text, true);
       input.value = '';
+
+      if (/^(?:pull|sync cloud|cloud pull|pull cloud|load cloud)$/i.test(text)) {
+        await pullCloudAndRewriteLocal();
+        return;
+      }
 
       const quoteMatch = text.match(/^(?:quote|price of|fetch price|get price)\s+([A-Za-z]+)$/i);
       if (quoteMatch) {
