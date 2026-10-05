@@ -13,7 +13,7 @@
 <body class="p-4 md:p-8">
   <div class="max-w-5xl mx-auto space-y-6">
     
-    <!-- Top Bar: Status, Keys, npoint Sync, Reset & Backups -->
+    <!-- Top Bar: Status, Keys, GitHub Gist Sync, Reset & Backups -->
     <div class="border-card p-4 rounded-lg flex flex-wrap items-center justify-between gap-4">
       <div>
         <div class="flex items-center gap-2">
@@ -23,7 +23,7 @@
           </span>
           <span id="cloudStatusBadge" class="bg-slate-900 text-slate-400 border border-slate-700 text-[10px] font-black px-2 py-0.5 rounded tracking-wide flex items-center gap-1">
             <span class="w-1.5 h-1.5 rounded-full bg-slate-500" id="cloudStatusDot"></span>
-            <span id="cloudStatusText">NPOINT: IDLE</span>
+            <span id="cloudStatusText">GIST: IDLE</span>
           </span>
         </div>
         <p class="text-xs text-slate-400 mt-0.5" id="rulesSummary">
@@ -39,9 +39,13 @@
                title="Free key from finnhub.io for direct real-time quotes"
                class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-cyan-500 w-24 text-slate-200">
 
-        <input id="npointIdInput" type="text" placeholder="npoint Bin ID (e.g. 5a1b2c3d)" 
-               title="Paste your npoint.io bin ID or full URL"
-               class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-purple-500 w-44 text-slate-200">
+        <input id="gistIdInput" type="text" placeholder="Gist ID or URL" 
+               title="Paste your Secret Gist ID (e.g. 3f8b92c4a1b2c3d4e5f6...)"
+               class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-purple-500 w-36 text-slate-200">
+
+        <input id="githubTokenInput" type="password" placeholder="GitHub Token (ghp_...)" 
+               title="GitHub Personal Access Token with 'gist' scope"
+               class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-purple-500 w-36 text-slate-200">
 
         <button onclick="saveApiKeys()" class="bg-emerald-600 hover:bg-emerald-500 text-black text-xs font-bold px-3 py-2 rounded transition">
           Save Keys
@@ -55,7 +59,7 @@
           Export
         </button>
         
-        <label class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-purple-300 text-xs font-bold px-3 py-2 rounded transition cursor-pointer" title="Import JSON file & overwrite npoint immediately">
+        <label class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-purple-300 text-xs font-bold px-3 py-2 rounded transition cursor-pointer" title="Import JSON file & overwrite Gist immediately">
           Import
           <input type="file" id="importFileInput" class="hidden" accept=".json" onchange="importBackupJSON(event)">
         </label>
@@ -184,7 +188,7 @@
       </div>
       
       <div id="terminalLog" class="h-64 overflow-y-auto bg-slate-950 p-3 rounded text-xs space-y-2 border border-slate-800/80">
-        <div class="text-slate-500">[System]: Ready. Encoded npoint.io synchronization active.</div>
+        <div class="text-slate-500">[System]: Ready. GitHub Gist cloud synchronization active.</div>
       </div>
 
       <div class="flex gap-2">
@@ -231,6 +235,7 @@
     };
 
     const DAILY_RATE = TRADERNET_RULES.dailyRate;
+    const GIST_FILE_NAME = "margin_state.json";
 
     function formatUSD(val) {
       const num = Number(val) || 0;
@@ -254,10 +259,10 @@
     }
 
     let state = createBlankState();
-    let npointSyncTimeout = null;
+    let gistSyncTimeout = null;
 
     // ==========================================
-    // NPOINT.IO ENCODING / DECODING ENGINE
+    // GITHUB GIST ENCODING & REPLICATION ENGINE
     // ==========================================
     function encodePayload(obj) {
       const jsonStr = JSON.stringify(obj);
@@ -273,22 +278,19 @@
       return JSON.parse(jsonStr);
     }
 
-    function resolveNpointUrl(rawInput) {
+    function extractCleanGistId(rawInput) {
       if (!rawInput) return "";
       let trimmed = rawInput.trim();
-      if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-        trimmed = trimmed.replace(/^\/+|\/+$/g, '');
-        return `https://api.npoint.io/${trimmed}`;
-      }
-      return trimmed;
+      const match = trimmed.match(/([a-f0-9]{20,32})/i);
+      return match ? match[1] : trimmed.replace(/.*gist\.github\.com\/[^/]+\//i, '').replace(/[^a-zA-Z0-9_-]/g, '');
     }
 
-    function setNpointStatus(status, text) {
+    function setGistStatus(status, text) {
       const dot = document.getElementById('cloudStatusDot');
       const label = document.getElementById('cloudStatusText');
       if (!dot || !label) return;
 
-      label.innerText = `NPOINT: ${text.toUpperCase()}`;
+      label.innerText = `GIST: ${text.toUpperCase()}`;
       dot.className = "w-1.5 h-1.5 rounded-full";
 
       if (status === 'syncing') {
@@ -302,62 +304,87 @@
       }
     }
 
-    async function pushStateToNpoint(forceImmediate = false) {
-      const rawInput = localStorage.getItem('npoint_bin_id');
-      const endpoint = resolveNpointUrl(rawInput);
-      if (!endpoint) return;
+    async function pushStateToGist(forceImmediate = false) {
+      const gistId = extractCleanGistId(localStorage.getItem('github_gist_id'));
+      const token = (localStorage.getItem('github_pat_token') || '').trim();
+      if (!gistId || !token) return;
 
       state.lastUpdated = Date.now();
 
       const doPush = async () => {
-        setNpointStatus('syncing', 'WRITING...');
+        setGistStatus('syncing', 'WRITING...');
         try {
-          const encodedStr = encodePayload(state);
-          const payload = {
-            v: 2,
+          const encodedBase64 = encodePayload(state);
+          const fileBody = JSON.stringify({
             updated: state.lastUpdated,
-            payload: encodedStr
-          };
+            payload: encodedBase64
+          }, null, 2);
 
-          const res = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+          const res = await fetch(`https://api.github.com/gists/${gistId}`, {
+            method: 'PATCH',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Accept': 'application/vnd.github+json',
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              files: {
+                [GIST_FILE_NAME]: {
+                  content: fileBody
+                }
+              }
+            })
           });
 
-          if (!res.ok) throw new Error("HTTP " + res.status);
-          setNpointStatus('synced', 'UPDATED');
+          if (!res.ok) {
+            const errJson = await res.json().catch(() => ({}));
+            throw new Error(`HTTP ${res.status}: ${errJson.message || 'Gist update rejected'}`);
+          }
+
+          setGistStatus('synced', 'UPDATED');
         } catch (err) {
-          setNpointStatus('error', 'FAIL');
+          logTerminal(`[Gist Sync Error]: ${err.message}`);
+          setGistStatus('error', 'FAIL');
         }
       };
 
       if (forceImmediate) {
-        if (npointSyncTimeout) clearTimeout(npointSyncTimeout);
+        if (gistSyncTimeout) clearTimeout(gistSyncTimeout);
         await doPush();
       } else {
-        if (npointSyncTimeout) clearTimeout(npointSyncTimeout);
-        npointSyncTimeout = setTimeout(doPush, 600);
+        if (gistSyncTimeout) clearTimeout(gistSyncTimeout);
+        gistSyncTimeout = setTimeout(doPush, 600);
       }
     }
 
-    async function pullStateFromNpointOnLoad() {
-      const rawInput = localStorage.getItem('npoint_bin_id');
-      const endpoint = resolveNpointUrl(rawInput);
-      if (!endpoint) return false;
+    async function pullStateFromGistOnLoad() {
+      const gistId = extractCleanGistId(localStorage.getItem('github_gist_id'));
+      const token = (localStorage.getItem('github_pat_token') || '').trim();
+      if (!gistId) return false;
 
-      setNpointStatus('syncing', 'FETCHING...');
+      setGistStatus('syncing', 'FETCHING...');
       try {
-        const res = await fetch(endpoint, { headers: { 'Accept': 'application/json' } });
-        if (!res.ok) throw new Error("HTTP " + res.status);
+        const headers = { 'Accept': 'application/vnd.github+json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+        const res = await fetch(`https://api.github.com/gists/${gistId}`, { headers });
+        if (!res.ok) {
+          const errJson = await res.json().catch(() => ({}));
+          throw new Error(`HTTP ${res.status}: ${errJson.message || 'Fetch failed'}`);
+        }
 
         const data = await res.json();
-        let remoteState = null;
+        const targetFile = data.files && (data.files[GIST_FILE_NAME] || Object.values(data.files)[0]);
+        if (!targetFile || !targetFile.content) throw new Error("Gist contains no readable file.");
 
-        if (data && data.payload && typeof data.payload === 'string') {
-          remoteState = decodePayload(data.payload);
-        } else if (data && typeof data === 'object' && data.positions) {
-          remoteState = data;
+        let remoteState = null;
+        let parsedEnvelope = null;
+        try { parsedEnvelope = JSON.parse(targetFile.content); } catch (e) {}
+
+        if (parsedEnvelope && parsedEnvelope.payload && typeof parsedEnvelope.payload === 'string') {
+          remoteState = decodePayload(parsedEnvelope.payload);
+        } else if (parsedEnvelope && typeof parsedEnvelope === 'object' && parsedEnvelope.positions) {
+          remoteState = parsedEnvelope;
         }
 
         if (remoteState && typeof remoteState === 'object' && remoteState.positions) {
@@ -365,12 +392,13 @@
           if (!state.cashCushion) state.cashCushion = { freeCash: 0.00, holdings: [] };
           if (!state.positions) state.positions = {};
           localStorage.setItem('margin_portfolio_state_dynamic_v2', JSON.stringify(state));
-          setNpointStatus('synced', 'ONLINE');
-          logTerminal("[npoint]: Successfully decrypted and loaded remote portfolio state.");
+          setGistStatus('synced', 'ONLINE');
+          logTerminal("[Gist]: Successfully decrypted and loaded remote state.");
           return true;
         }
       } catch (e) {
-        setNpointStatus('error', 'OFFLINE');
+        logTerminal(`[Gist Notice]: Could not pull remote Gist (${e.message}). Falling back to local cache.`);
+        setGistStatus('error', 'OFFLINE');
       }
       return false;
     }
@@ -382,10 +410,13 @@
       const savedFinnhub = localStorage.getItem('finnhub_api_key');
       if (savedFinnhub) document.getElementById('finnhubKeyInput').value = savedFinnhub;
 
-      const savedNpoint = localStorage.getItem('npoint_bin_id');
-      if (savedNpoint) document.getElementById('npointIdInput').value = savedNpoint;
+      const savedGistId = localStorage.getItem('github_gist_id');
+      if (savedGistId) document.getElementById('gistIdInput').value = savedGistId;
 
-      const pulled = await pullStateFromNpointOnLoad();
+      const savedToken = localStorage.getItem('github_pat_token');
+      if (savedToken) document.getElementById('githubTokenInput').value = savedToken;
+
+      const pulled = await pullStateFromGistOnLoad();
       if (!pulled) {
         const saved = localStorage.getItem('margin_portfolio_state_dynamic_v2');
         if (saved) {
@@ -409,14 +440,14 @@
     function saveState() {
       state.lastUpdated = Date.now();
       localStorage.setItem('margin_portfolio_state_dynamic_v2', JSON.stringify(state));
-      pushStateToNpoint(false);
+      pushStateToGist(false);
     }
 
     function resetToBlankState() {
-      if (confirm("Reset the entire terminal to a blank slate? This will clear all holdings, balances, and history locally and on npoint.")) {
+      if (confirm("Reset the entire terminal to a blank slate? This will clear all holdings, balances, and history locally and on GitHub Gist.")) {
         state = createBlankState();
         saveState();
-        pushStateToNpoint(true);
+        pushStateToGist(true);
         renderBoard();
         logTerminal("[System]: Portfolio reset to a clean blank slate.");
       }
@@ -429,12 +460,16 @@
       const fKey = document.getElementById('finnhubKeyInput').value.trim();
       localStorage.setItem('finnhub_api_key', fKey);
 
-      const npointId = document.getElementById('npointIdInput').value.trim();
-      localStorage.setItem('npoint_bin_id', npointId);
+      const rawGist = document.getElementById('gistIdInput').value.trim();
+      const cleanGistId = extractCleanGistId(rawGist);
+      localStorage.setItem('github_gist_id', cleanGistId);
+
+      const token = document.getElementById('githubTokenInput').value.trim();
+      localStorage.setItem('github_pat_token', token);
 
       logTerminal("[System]: Credentials saved.");
-      if (npointId) {
-        pushStateToNpoint(true);
+      if (cleanGistId && token) {
+        pushStateToGist(true);
       }
     }
 
@@ -1055,9 +1090,9 @@
             if (!state.positions) state.positions = {};
             
             localStorage.setItem('margin_portfolio_state_dynamic_v2', JSON.stringify(state));
-            await pushStateToNpoint(true);
+            await pushStateToGist(true);
             renderBoard();
-            logTerminal(`[Backup Import]: Successfully imported ${file.name}. npoint data overwritten.`);
+            logTerminal(`[Backup Import]: Successfully imported ${file.name}. GitHub Gist overwritten.`);
           } else {
             throw new Error("Invalid structure");
           }
