@@ -344,7 +344,7 @@
       <div class="flex gap-2">
         <input id="cmdInput" type="text" placeholder="e.g. bought 20 JBL for 290, pt 305 | add cash stock 50 AAPL | b: -5000" 
                class="flex-1 bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-emerald-500 text-white"
-               onkeydown="if(event.key==='Enter') executeCommand()">
+               onkeydown="if(event.key === 'Enter') executeCommand()">
         <button onclick="executeCommand()" class="bg-emerald-600 hover:bg-emerald-500 text-black text-xs font-bold px-4 py-2 rounded transition">
           Send
         </button>
