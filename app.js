@@ -768,6 +768,10 @@ function renderProjectionTable(gross, totalComms, debtToUse, marginChargedToUse,
 
 function logTerminal(content, isUser = false, isHtml = false) {
   const log = document.getElementById('terminalLog');
+  if (!log) {
+    console.log(content);
+    return;
+  }
   const div = document.createElement('div');
   if (isUser) {
     div.className = "text-cyan-400 font-semibold";
