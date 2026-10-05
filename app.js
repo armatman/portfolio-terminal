@@ -41,9 +41,11 @@ let state = createBlankState();
 let gistSyncTimeout = null;
 let quoteRefreshTimer = null;
 let isRefreshingLivePrices = false;
+let lastRenderedDeskView = null;
+const livePriceRequests = new Map();
 
 const QUOTE_REFRESH_INTERVAL_KEY = 'quote_refresh_interval_ms';
-const DEFAULT_QUOTE_REFRESH_INTERVAL_MS = 15 * 1000;
+const DEFAULT_QUOTE_REFRESH_INTERVAL_MS = 60 * 1000;
 const QUOTE_REFRESH_INTERVALS = new Set([0, 15 * 1000, 30 * 1000, 60 * 1000]);
 
 // ==========================================
@@ -492,11 +494,15 @@ function renderBoard() {
 
   const mainDesk = document.getElementById('mainDeskContainer');
   const cushionDesk = document.getElementById('cashCushionContainer');
+  let activeDesk;
+  let activeDeskView;
 
   if (isCushionActive) {
     mainDesk.classList.add('hidden');
     cushionDesk.classList.remove('hidden');
     renderCashCushionPanel();
+    activeDesk = cushionDesk;
+    activeDeskView = 'CASH_CUSHION';
   } else {
     mainDesk.classList.remove('hidden');
     cushionDesk.classList.add('hidden');
@@ -508,9 +514,23 @@ function renderBoard() {
     } else {
       renderCombinedView([]);
     }
+    activeDesk = mainDesk;
+    activeDeskView = state.activeView;
+  }
+
+  if (activeDeskView !== lastRenderedDeskView) {
+    playEntryAnimation(activeDesk, 'ui-view-enter');
+    lastRenderedDeskView = activeDeskView;
   }
 
   updateCombinedBreakeven();
+}
+
+function playEntryAnimation(element, animationClass) {
+  element.classList.remove(animationClass);
+  void element.offsetWidth;
+  element.classList.add(animationClass);
+  element.addEventListener('animationend', () => element.classList.remove(animationClass), { once: true });
 }
 
 function renderCashCushionPanel() {
@@ -525,21 +545,30 @@ function renderCashCushionPanel() {
   }
 
   const tableBody = document.getElementById('cashStocksTableBody');
+  const tableFooter = document.getElementById('cashStocksTableFooter');
   tableBody.innerHTML = '';
 
   let stocksTotal = 0;
+  const holdings = state.cashCushion.holdings || [];
 
-  (state.cashCushion.holdings || []).forEach((h, idx) => {
-    const val = h.shares * h.price;
-    stocksTotal += val;
+  holdings.forEach(h => {
+    stocksTotal += (Number(h.shares) || 0) * (Number(h.price) || 0);
+  });
+
+  holdings.forEach((h, idx) => {
+    const shares = Number(h.shares) || 0;
+    const price = Number(h.price) || 0;
+    const val = shares * price;
+    const allocation = stocksTotal > 0 ? (val / stocksTotal) * 100 : 0;
 
     const tr = document.createElement('tr');
     tr.className = "hover:bg-slate-900/40";
     tr.innerHTML = `
       <td class="py-2 px-3 text-cyan-300 font-bold">${h.ticker}</td>
-      <td class="py-2 px-3 text-right text-slate-200">${h.shares}</td>
-      <td class="py-2 px-3 text-right text-emerald-400 font-semibold">$${formatUSD(h.price)}</td>
+      <td class="py-2 px-3 text-right text-slate-200 tabular-nums">${shares.toLocaleString('en-US', { maximumFractionDigits: 3 })}</td>
+      <td class="py-2 px-3 text-right text-emerald-400 font-semibold tabular-nums">$${formatUSD(price)}</td>
       <td class="py-2 px-3 text-right text-white font-semibold">$${formatUSD(val)}</td>
+      <td class="py-2 px-3 text-right text-slate-300 tabular-nums">${allocation.toFixed(1)}%</td>
       <td class="py-2 px-3 text-center space-x-2">
         <button onclick="fetchLivePrice('${h.ticker}')" class="text-cyan-400 hover:text-cyan-300 text-xs font-bold" title="Refresh Live Price">↻</button>
         <button onclick="removeCashStock(${idx})" class="text-rose-400 hover:text-rose-300 text-xs font-bold">Remove</button>
@@ -549,8 +578,18 @@ function renderCashCushionPanel() {
   });
 
   if ((state.cashCushion.holdings || []).length === 0) {
-    tableBody.innerHTML = `<tr><td colspan="5" class="py-3 text-center text-slate-500 italic">No cash stocks entered. Add unleveraged stocks below (price auto-fetches).</td></tr>`;
+    tableBody.innerHTML = `<tr><td colspan="6" class="py-3 text-center text-slate-500 italic">No cash stocks entered. Add unleveraged stocks below (price auto-fetches).</td></tr>`;
   }
+  tableFooter.innerHTML = holdings.length > 0
+    ? `<tr>
+        <td class="py-2 px-3 text-slate-300 font-bold" colspan="3">${holdings.length} holding${holdings.length === 1 ? '' : 's'}</td>
+        <td class="py-2 px-3 text-right text-white font-bold">$${formatUSD(stocksTotal)}</td>
+        <td class="py-2 px-3 text-right text-slate-300 font-bold">${stocksTotal > 0 ? '100.0%' : '—'}</td>
+        <td></td>
+      </tr>`
+    : '';
+  document.getElementById('cashHoldingsSummary').textContent =
+    `${holdings.length} holding${holdings.length === 1 ? '' : 's'} · $${formatUSD(stocksTotal)} market value`;
 
   const totalCushion = freeCash + stocksTotal;
   document.getElementById('cushionTotalValue').innerText = `$${formatUSD(totalCushion)}`;
@@ -567,7 +606,10 @@ function setCurrentBalance(value) {
 }
 
 function saveCurrentBalanceFromInput() {
-  const inputValue = parseFloat(document.getElementById('freeCashInput').value);
+  const input = document.getElementById('freeCashInput');
+  if (!input.reportValidity()) return;
+
+  const inputValue = input.valueAsNumber;
   const { balance, debt } = setCurrentBalance(inputValue);
   saveState();
   renderBoard();
@@ -581,11 +623,15 @@ async function addCashStockFromUI() {
   const priceInput = document.getElementById('newCashPrice');
 
   const ticker = tickerInput.value.trim().toUpperCase();
-  const shares = parseFloat(sharesInput.value);
-  const manualPrice = parseFloat(priceInput.value);
+  const shares = sharesInput.valueAsNumber;
+  const manualPrice = priceInput.value === '' ? NaN : priceInput.valueAsNumber;
 
-  if (!ticker || isNaN(shares) || shares <= 0) {
+  if (!tickerInput.reportValidity() || !sharesInput.reportValidity() ||
+      (priceInput.value !== '' && !priceInput.reportValidity())) return;
+
+  if (!ticker) {
     logTerminal(`[Error]: Please enter valid ticker symbol and share count.`);
+    tickerInput.focus();
     return;
   }
 
@@ -670,6 +716,7 @@ function renderCombinedView(tickers) {
   document.getElementById('boardMarginCharged').innerText = `$${formatUSD(totalMarginCharged)}`;
 
   const cushionTotal = getCashCushionTotal();
+  document.getElementById('boardCushionLabel').innerText = 'Cash / Collateral Cushion:';
   document.getElementById('boardCushionMetric').innerText = `+$${formatUSD(cushionTotal)}`;
 
   const totalAccountEquity = (totalMarketValue + cushionTotal) - totalDebt;
@@ -677,28 +724,7 @@ function renderCombinedView(tickers) {
   const equityPct = totalAccountAssets > 0 ? (totalAccountEquity / totalAccountAssets) * 100 : 0;
   document.getElementById('boardEquity').innerText = `$${formatUSD(totalAccountEquity)} (${equityPct.toFixed(2)}%)`;
 
-  if (totalDebt === 0) {
-    document.getElementById('boardMarginCall').innerHTML = `<span class="text-emerald-400">NO DEBT (0% Debt Exposed)</span>`;
-    document.getElementById('boardStopOut').innerHTML = `<span class="text-emerald-400">NO STOP-OUT RISK</span>`;
-  } else {
-    const requiredAssetsForMCall = totalDebt / (1 - TRADERNET_RULES.maintenanceMarginRatio);
-    const mCallThresholdOnMarginPositions = Math.max(0, requiredAssetsForMCall - cushionTotal);
-    const stopOutThresholdOnMarginPositions = Math.max(0, totalDebt - cushionTotal);
-
-    if (cushionTotal >= requiredAssetsForMCall) {
-      document.getElementById('boardMarginCall').innerHTML = `<span class="text-emerald-400 font-bold">Protected by Cushion ($0.00 Trigger)</span>`;
-      document.getElementById('boardStopOut').innerHTML = `<span class="text-emerald-400 font-bold">None (100% Collateralized)</span>`;
-    } else if (cushionTotal >= totalDebt) {
-      const mCallBuffer = totalMarketValue > 0 ? ((totalMarketValue - mCallThresholdOnMarginPositions) / totalMarketValue) * 100 : 0;
-      document.getElementById('boardMarginCall').innerText = `Pos Val $${formatUSD(mCallThresholdOnMarginPositions)} (Buffer: ${mCallBuffer.toFixed(2)}%)`;
-      document.getElementById('boardStopOut').innerHTML = `<span class="text-emerald-400 font-bold">None (100% Collateralized)</span>`;
-    } else {
-      const mCallBuffer = totalMarketValue > 0 ? ((totalMarketValue - mCallThresholdOnMarginPositions) / totalMarketValue) * 100 : 0;
-      const stopOutBuffer = totalMarketValue > 0 ? ((totalMarketValue - stopOutThresholdOnMarginPositions) / totalMarketValue) * 100 : 0;
-      document.getElementById('boardMarginCall').innerText = `Pos Val $${formatUSD(mCallThresholdOnMarginPositions)} (Buffer: ${mCallBuffer.toFixed(2)}%)`;
-      document.getElementById('boardStopOut').innerText = `Pos Val $${formatUSD(stopOutThresholdOnMarginPositions)} (Buffer: ${stopOutBuffer.toFixed(2)}%)`;
-    }
-  }
+  renderMarginRisk(totalDebt, totalMarketValue, cushionTotal);
 
   renderProjectionTable(totalGrossTarget, totalComms, totalDebt, totalMarginCharged, state.startDate);
 }
@@ -717,6 +743,8 @@ function renderSingleAssetView(pos) {
   
   const totalAccountDebt = Math.abs(state.marginBalance);
   const allocatedDebt = totalAccountDebt * weight;
+  const totalCushion = getCashCushionTotal();
+  const allocatedCushion = totalCushion * weight;
   const allocatedDailyAccrual = allocatedDebt * DAILY_RATE;
   const posMarginCharged = pos.marginCharged || 0.00;
 
@@ -744,41 +772,73 @@ function renderSingleAssetView(pos) {
   document.getElementById('boardComms').innerText = `$${formatUSD(totalComms)} ($${formatUSD(pos.commBuy)} buy / $${formatUSD(commSell)} sell)`;
   document.getElementById('boardMarginCharged').innerText = `$${formatUSD(posMarginCharged)} (Position To Date)`;
 
-  const cushionTotal = getCashCushionTotal();
-  document.getElementById('boardCushionMetric').innerText = `+$${formatUSD(cushionTotal)}`;
+  document.getElementById('boardCushionLabel').innerText = 'Allocated Cash / Collateral:';
+  document.getElementById('boardCushionMetric').innerText = `+$${formatUSD(allocatedCushion)}`;
 
-  const positionEquity = (currentMktVal + cushionTotal) - allocatedDebt;
-  const equityPct = (currentMktVal + cushionTotal) > 0 ? (positionEquity / (currentMktVal + cushionTotal)) * 100 : 0;
+  const positionAssets = currentMktVal + allocatedCushion;
+  const positionEquity = positionAssets - allocatedDebt;
+  const equityPct = positionAssets > 0 ? (positionEquity / positionAssets) * 100 : 0;
   document.getElementById('boardEquity').innerText = `$${formatUSD(positionEquity)} (${equityPct.toFixed(2)}%)`;
 
-  if (pos.shares > 0 && allocatedDebt > 0) {
-    const requiredTotalForMCall = allocatedDebt / (1 - TRADERNET_RULES.maintenanceMarginRatio);
-    const mCallValNeeded = Math.max(0, requiredTotalForMCall - cushionTotal);
-    const stopOutValNeeded = Math.max(0, allocatedDebt - cushionTotal);
-
-    if (cushionTotal >= requiredTotalForMCall) {
-      document.getElementById('boardMarginCall').innerHTML = `<span class="text-emerald-400 font-bold">Protected by Cushion ($0.00 Trigger)</span>`;
-      document.getElementById('boardStopOut').innerHTML = `<span class="text-emerald-400 font-bold">None (100% Collateralized)</span>`;
-    } else if (cushionTotal >= allocatedDebt) {
-      const mCallPrice = mCallValNeeded / pos.shares;
-      const mCallBufferPct = ((pos.currentPrice - mCallPrice) / pos.currentPrice) * 100;
-      document.getElementById('boardMarginCall').innerText = `$${formatUSD(mCallPrice)} (Buffer: ${mCallBufferPct.toFixed(2)}%)`;
-      document.getElementById('boardStopOut').innerHTML = `<span class="text-emerald-400 font-bold">None (100% Collateralized)</span>`;
-    } else {
-      const mCallPrice = mCallValNeeded / pos.shares;
-      const mCallBufferPct = ((pos.currentPrice - mCallPrice) / pos.currentPrice) * 100;
-      const stopOutPrice = stopOutValNeeded / pos.shares;
-      const stopOutBufferPct = ((pos.currentPrice - stopOutPrice) / pos.currentPrice) * 100;
-
-      document.getElementById('boardMarginCall').innerText = `$${formatUSD(mCallPrice)} (Buffer: ${mCallBufferPct.toFixed(2)}%)`;
-      document.getElementById('boardStopOut').innerText = `$${formatUSD(stopOutPrice)} (Buffer: ${stopOutBufferPct.toFixed(2)}%)`;
-    }
-  } else {
-    document.getElementById('boardMarginCall').innerHTML = `<span class="text-emerald-400 font-bold">N/A (No active debt)</span>`;
-    document.getElementById('boardStopOut').innerHTML = `<span class="text-emerald-400 font-bold">N/A</span>`;
-  }
+  renderMarginRisk(allocatedDebt, currentMktVal, allocatedCushion);
 
   renderProjectionTable(gross, totalComms, allocatedDebt, posMarginCharged, pos.startDate || state.startDate);
+}
+
+function renderMarginRisk(debt, positionValue, collateral) {
+  const marginCallRow = document.getElementById('boardMarginCallRow');
+  const stopOutRow = document.getElementById('boardStopOutRow');
+  const riskSummary = document.getElementById('boardMarginRisk');
+
+  if (debt <= 0) {
+    riskSummary.innerText = 'No margin debt';
+    riskSummary.className = 'text-emerald-400 font-bold font-mono';
+    marginCallRow.classList.add('hidden');
+    stopOutRow.classList.add('hidden');
+    return;
+  }
+
+  const assets = positionValue + collateral;
+  const equity = assets - debt;
+  const equityRatio = assets > 0 ? (equity / assets) * 100 : -Infinity;
+  const maintenanceRatio = TRADERNET_RULES.maintenanceMarginRatio * 100;
+  let riskLevel;
+  let riskClass;
+
+  if (equity <= 0) {
+    riskLevel = 'Stop-out level';
+    riskClass = 'text-rose-400';
+  } else if (equityRatio <= maintenanceRatio) {
+    riskLevel = 'Margin-call level';
+    riskClass = 'text-rose-400';
+  } else if (equityRatio <= maintenanceRatio + 5) {
+    riskLevel = 'Elevated';
+    riskClass = 'text-amber-400';
+  } else {
+    riskLevel = 'Healthy';
+    riskClass = 'text-emerald-400';
+  }
+  riskSummary.innerText = `${riskLevel} · ${Number.isFinite(equityRatio) ? `${equityRatio.toFixed(1)}% equity` : 'negative equity'} (10% required)`;
+  riskSummary.className = `${riskClass} font-bold font-mono`;
+
+  const marginCallAssetsRequired = debt / (1 - TRADERNET_RULES.maintenanceMarginRatio);
+  marginCallRow.classList.toggle('hidden', collateral >= marginCallAssetsRequired);
+  stopOutRow.classList.toggle('hidden', collateral >= debt);
+  const marginCallValue = Math.max(0, marginCallAssetsRequired - collateral);
+  const stopOutValue = Math.max(0, debt - collateral);
+
+  if (marginCallValue > 0) document.getElementById('boardMarginCall').innerText = formatRiskTrigger(marginCallValue, positionValue);
+  if (collateral < debt) document.getElementById('boardStopOut').innerText = formatRiskTrigger(stopOutValue, positionValue);
+}
+
+function formatRiskTrigger(triggerValue, currentValue) {
+  if (currentValue <= 0) return `Position value $${formatUSD(triggerValue)}`;
+
+  const bufferPct = ((currentValue - triggerValue) / currentValue) * 100;
+  if (bufferPct < 0) {
+    return `Position value $${formatUSD(triggerValue)} (already ${Math.abs(bufferPct).toFixed(1)}% below trigger)`;
+  }
+  return `Position value $${formatUSD(triggerValue)} (${bufferPct.toFixed(1)}% buffer)`;
 }
 
 function renderProjectionTable(gross, totalComms, debtToUse, marginChargedToUse, baseDateStr) {
@@ -835,6 +895,7 @@ function showToast(message, type = 'info') {
   };
 
   toast.className = `border rounded-lg px-3 py-2 text-xs font-semibold shadow-lg backdrop-blur-sm ${palette[type] || palette.info}`;
+  toast.classList.add('ui-toast-enter');
   toast.textContent = message;
   container.appendChild(toast);
 
@@ -870,10 +931,23 @@ function logTerminal(content, isUser = false, isHtml = false) {
   log.scrollTop = log.scrollHeight;
 }
 
-async function fetchLivePrice(ticker, silent = false) {
-  const symbol = ticker.toUpperCase();
+async function requestLivePrice(symbol) {
+  const existingRequest = livePriceRequests.get(symbol);
+  if (existingRequest) return existingRequest;
+
+  const request = fetchLivePriceFromProviders(symbol);
+  livePriceRequests.set(symbol, request);
+  try {
+    return await request;
+  } finally {
+    if (livePriceRequests.get(symbol) === request) livePriceRequests.delete(symbol);
+  }
+}
+
+async function fetchLivePriceFromProviders(symbol) {
   let price = null;
   let sourceName = "";
+  const providerErrors = [];
 
   const finnhubKey = localStorage.getItem('finnhub_api_key');
 
@@ -885,9 +959,15 @@ async function fetchLivePrice(ticker, silent = false) {
         if (data && data.c && Number(data.c) > 0) {
           price = Number(data.c);
           sourceName = "Finnhub Live";
+        } else {
+          providerErrors.push("Finnhub returned no valid quote");
         }
+      } else {
+        providerErrors.push(`Finnhub returned HTTP ${res.status}`);
       }
-    } catch (e) {}
+    } catch (error) {
+      providerErrors.push(`Finnhub: ${error.message}`);
+    }
   }
 
   if (!price) {
@@ -906,39 +986,64 @@ async function fetchLivePrice(ticker, silent = false) {
             if (!isNaN(val) && val > 0) {
               price = val;
               sourceName = "Stooq Feed";
+            } else {
+              providerErrors.push("Stooq returned no valid quote");
             }
+          } else {
+            providerErrors.push("Stooq returned an empty quote");
           }
+        } else {
+          providerErrors.push("Stooq proxy returned no quote data");
         }
+      } else {
+        providerErrors.push(`Stooq proxy returned HTTP ${res.status}`);
       }
-    } catch (e) {}
+    } catch (error) {
+      providerErrors.push(`Stooq: ${error.message}`);
+    }
   }
 
   if (price) {
-    let matched = false;
     if (state.positions[symbol]) {
       state.positions[symbol].currentPrice = price;
-      matched = true;
     }
     if (state.cashCushion && state.cashCushion.holdings) {
       const cashHolding = state.cashCushion.holdings.find(h => h.ticker === symbol);
       if (cashHolding) {
         cashHolding.price = price;
-        matched = true;
       }
     }
+  }
+
+  return {
+    price,
+    sourceName,
+    error: price ? null : (providerErrors.length ? providerErrors.join("; ") : "No quote provider is configured")
+  };
+}
+
+async function fetchLivePrice(ticker, silent = false) {
+  const symbol = ticker.toUpperCase();
+  const result = await requestLivePrice(symbol);
+
+  if (result.price !== null) {
+    const matched = Boolean(
+      state.positions[symbol] ||
+      state.cashCushion?.holdings?.some(holding => holding.ticker === symbol)
+    );
     saveState();
     renderBoard();
     if (!silent) {
-      logTerminal(`[${sourceName}]: ${symbol} updated to $${formatUSD(price)}${matched ? '' : ' (quote only)'}.`);
+      logTerminal(`[${result.sourceName}]: ${symbol} updated to $${formatUSD(result.price)}${matched ? '' : ' (quote only)'}.`);
     }
-    return price;
-  } else {
-    const tracked = state.positions[symbol]?.currentPrice || (state.cashCushion?.holdings?.find(h => h.ticker === symbol)?.price) || 0;
-    if (!silent) {
-      logTerminal(`[Market Data]: Could not reach feeds. Retained tracked price: $${formatUSD(tracked)}. Set manually via: price ${symbol} <number>.`);
-    }
-    return null;
+    return result.price;
   }
+
+  const tracked = state.positions[symbol]?.currentPrice || (state.cashCushion?.holdings?.find(h => h.ticker === symbol)?.price) || 0;
+  if (!silent) {
+    logTerminal(`[Market Data Error]: Could not fetch ${symbol}. ${result.error}. Retained tracked price: $${formatUSD(tracked)}. Set manually via: price ${symbol} <number>.`);
+  }
+  return null;
 }
 
 async function refreshAllLivePrices() {
@@ -953,11 +1058,19 @@ async function refreshAllLivePrices() {
   isRefreshingLivePrices = true;
   try {
     logTerminal(`[System]: Polling live quotes for ${allSymbols.join(', ')}...`);
+    const failedQuotes = [];
     for (const sym of allSymbols) {
-      await fetchLivePrice(sym, true);
+      const result = await requestLivePrice(sym);
+      if (result.price === null) failedQuotes.push(`${sym} (${result.error})`);
     }
+    if (failedQuotes.length < allSymbols.length) saveState();
     renderBoard();
-    logTerminal(`[System]: Live market quotes refreshed for all assets.`);
+    if (failedQuotes.length === 0) {
+      logTerminal(`[System]: Live market quotes refreshed for all ${allSymbols.length} assets.`);
+    } else {
+      const successfulCount = allSymbols.length - failedQuotes.length;
+      logTerminal(`[Market Data Error]: Quotes refreshed for ${successfulCount}/${allSymbols.length} assets. Failed: ${failedQuotes.join(', ')}.`);
+    }
   } finally {
     isRefreshingLivePrices = false;
   }
@@ -969,13 +1082,13 @@ function setQuoteRefreshInterval(interval) {
     throw new Error(`Unsupported quote refresh interval: ${interval}`);
   }
 
-  if (quoteRefreshTimer) clearInterval(quoteRefreshTimer);
+  if (quoteRefreshTimer !== null) clearInterval(quoteRefreshTimer);
   quoteRefreshTimer = null;
   localStorage.setItem(QUOTE_REFRESH_INTERVAL_KEY, String(intervalMs));
 
   if (intervalMs > 0) {
     quoteRefreshTimer = setInterval(() => {
-      document.getElementById('refreshQuotesButton').click();
+      if (!document.hidden) document.getElementById('refreshQuotesButton').click();
     }, intervalMs);
   }
 }

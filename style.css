@@ -46,9 +46,15 @@ body::before {
 #terminalLog,
 #tickerTabs,
 input,
-button,
-label {
-  transition: all 160ms ease;
+select,
+button {
+  transition:
+    color 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    opacity 160ms ease,
+    transform 160ms ease;
 }
 
 #terminalLog {
@@ -85,17 +91,79 @@ label {
 
 button,
 input,
-label {
+select {
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
 }
 
-button:hover,
-label:hover {
+button:hover:not(:disabled) {
   transform: translateY(-1px);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 input::placeholder {
   color: rgba(148, 163, 184, 0.86);
+}
+
+input[type="number"] {
+  font-variant-numeric: tabular-nums;
+}
+
+input[type="number"]:focus-visible,
+input[type="text"]:focus-visible,
+select:focus-visible,
+button:focus-visible {
+  outline: 2px solid rgba(34, 211, 238, 0.8);
+  outline-offset: 2px;
+}
+
+input[type="number"]:user-invalid {
+  border-color: rgba(251, 113, 133, 0.7);
+}
+
+tbody tr {
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.border-card {
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.ui-view-enter {
+  animation: ui-view-enter 220ms ease-out both;
+}
+
+.ui-toast-enter {
+  animation: ui-toast-enter 180ms ease-out both;
+}
+
+@keyframes ui-view-enter {
+  from {
+    opacity: 0.72;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ui-toast-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 #mainDeskContainer,
@@ -111,5 +179,27 @@ input::placeholder {
 
   .border-card {
     border-radius: 0.875rem;
+  }
+
+  #cashCushionContainer > .bg-slate-900\/60 {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  #cashCushionContainer > .bg-slate-900\/60 > div:last-child {
+    align-items: flex-end;
+    justify-content: space-between;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

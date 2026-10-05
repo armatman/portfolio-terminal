@@ -145,9 +145,16 @@
           
           <div class="md:col-span-2 border-t border-slate-800/80 pt-2 flex flex-wrap gap-x-6 gap-y-1 text-slate-300">
             <div><span class="text-slate-500">Total Account Equity:</span> <span id="boardEquity" class="text-white font-bold font-mono">$0.00</span></div>
-            <div><span class="text-slate-500">Cash / Collateral Cushion:</span> <span id="boardCushionMetric" class="text-cyan-400 font-bold font-mono">$0.00</span></div>
-            <div><span class="text-slate-500">Tradernet Margin Call (10% D_min):</span> <span id="boardMarginCall" class="text-amber-400 font-bold font-mono">$0.00</span></div>
-            <div><span class="text-slate-500">Stop-Out (0% Equity):</span> <span id="boardStopOut" class="text-rose-400 font-bold font-mono">$0.00</span></div>
+            <div><span id="boardCushionLabel" class="text-slate-500">Allocated Cash / Collateral:</span> <span id="boardCushionMetric" class="text-cyan-400 font-bold font-mono">$0.00</span></div>
+            <div title="Estimated from portfolio equity and configured margin thresholds; not a live broker risk indicator.">
+              <span class="text-slate-500">Margin Risk:</span> <span id="boardMarginRisk" class="text-emerald-400 font-bold font-mono">No margin debt</span>
+            </div>
+            <div id="boardMarginCallRow" class="hidden" title="Estimate assumes the configured maintenance-margin ratio and that the full allocated cushion qualifies as collateral. Actual broker requirements may differ.">
+              <span class="text-slate-500">Margin-call trigger:</span> <span id="boardMarginCall" class="text-amber-400 font-bold font-mono"></span>
+            </div>
+            <div id="boardStopOutRow" class="hidden" title="Estimate assumes the configured 0% equity stop-out threshold and that the full allocated cushion qualifies as collateral. Actual broker requirements may differ.">
+              <span class="text-slate-500">Stop-out trigger:</span> <span id="boardStopOut" class="text-rose-400 font-bold font-mono"></span>
+            </div>
           </div>
         </div>
 
@@ -183,14 +190,20 @@
 
         <!-- Current Balance Setting -->
         <div class="bg-slate-900/60 p-3 rounded border border-slate-800 flex items-center justify-between">
-          <div>
+          <div class="min-w-0">
             <span class="text-xs font-bold text-white block">Current Balance / Margin Debt</span>
             <span id="cashBalanceDebtMeta" class="text-[11px] text-slate-500">Balance: $0.00 | Debt: -$0.00</span>
           </div>
-          <div class="flex items-center gap-2">
-            <input type="number" id="freeCashInput" step="0.01" placeholder="Positive = balance, negative = debt" 
-                   class="bg-slate-950 border border-slate-700 text-xs px-3 py-1.5 rounded w-36 text-right text-emerald-400 font-mono font-bold focus:outline-none focus:border-cyan-500">
-            <button onclick="saveCurrentBalanceFromInput()" class="bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-bold px-3 py-1.5 rounded border border-slate-600 transition">
+          <div class="flex shrink-0 items-end gap-2">
+            <label class="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-slate-500">
+              <span>Signed amount (USD)</span>
+              <span class="relative">
+                <span class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden="true">$</span>
+                <input type="number" id="freeCashInput" step="0.01" required inputmode="decimal" aria-label="Signed balance or margin debt in US dollars" title="Positive values are cash balance; negative values are margin debt"
+                       class="number-input bg-slate-950 border border-slate-700 text-xs pl-6 pr-2 py-2 rounded w-40 text-right text-emerald-300 font-mono font-bold focus:outline-none focus:border-cyan-500">
+              </span>
+            </label>
+            <button type="button" onclick="saveCurrentBalanceFromInput()" class="bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-bold px-3 py-2 rounded border border-slate-600 transition">
               Update
             </button>
           </div>
@@ -200,30 +213,50 @@
         <div class="space-y-2">
           <div class="flex justify-between items-center">
             <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Non-Margin Holdings</span>
-            <span class="text-[11px] text-emerald-400 font-semibold">● Auto-syncs live market prices</span>
+            <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-[11px]">
+              <span id="cashHoldingsSummary" class="text-slate-300 font-semibold">0 holdings · $0.00 market value</span>
+              <span class="text-emerald-400 font-semibold">● Auto-syncs live market prices</span>
+            </div>
           </div>
 
           <div class="overflow-x-auto">
-            <table class="w-full text-left text-xs border-collapse">
+            <table class="w-full min-w-[620px] text-left text-xs border-collapse">
               <thead>
                 <tr class="border-b border-slate-800 text-slate-400 font-medium">
                   <th class="py-2 px-3">Ticker</th>
                   <th class="py-2 px-3 text-right">Shares</th>
-                  <th class="py-2 px-3 text-right">Online Market Price</th>
-                  <th class="py-2 px-3 text-right">Collateral Value</th>
+                  <th class="py-2 px-3 text-right">Price / Share</th>
+                  <th class="py-2 px-3 text-right">Market Value</th>
+                  <th class="py-2 px-3 text-right">Stock Allocation</th>
                   <th class="py-2 px-3 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody id="cashStocksTableBody" class="divide-y divide-slate-800/60 font-mono"></tbody>
+              <tfoot id="cashStocksTableFooter" class="border-t border-slate-700 font-mono"></tfoot>
             </table>
           </div>
 
           <!-- Add Cash Stock Row -->
-          <div class="bg-slate-900/40 p-2.5 rounded border border-slate-800/80 flex flex-wrap items-center gap-2 pt-2">
-            <input type="text" id="newCashTicker" placeholder="Ticker (e.g. AAPL)" class="bg-slate-950 border border-slate-700 text-xs px-2.5 py-1.5 rounded text-white w-28 uppercase">
-            <input type="number" id="newCashShares" placeholder="Shares" class="bg-slate-950 border border-slate-700 text-xs px-2.5 py-1.5 rounded text-white w-24 text-right">
-            <input type="number" id="newCashPrice" step="0.01" placeholder="Price (Optional - auto-fetches)" class="bg-slate-950 border border-slate-700 text-xs px-2.5 py-1.5 rounded text-white w-48 text-right">
-            <button onclick="addCashStockFromUI()" class="bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold px-3 py-1.5 rounded transition">
+          <div class="bg-slate-900/40 p-2.5 rounded border border-slate-800/80 flex flex-wrap items-end gap-2 pt-2">
+            <label class="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-slate-500">
+              Ticker
+              <input type="text" id="newCashTicker" placeholder="e.g. AAPL" required aria-label="Stock ticker symbol" autocomplete="off" autocapitalize="characters"
+                     class="bg-slate-950 border border-slate-700 text-xs px-2.5 py-2 rounded text-white w-28 uppercase focus:outline-none focus:border-cyan-500">
+            </label>
+            <label class="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-slate-500">
+              Shares
+              <input type="number" id="newCashShares" placeholder="0" min="0.001" step="0.001" required inputmode="decimal" aria-label="Number of shares"
+                     class="number-input bg-slate-950 border border-slate-700 text-xs px-2.5 py-2 rounded text-white w-28 text-right font-mono tabular-nums focus:outline-none focus:border-cyan-500">
+            </label>
+            <label class="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-slate-500">
+              Price (optional)
+              <span class="relative">
+                <span class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden="true">$</span>
+                <input type="number" id="newCashPrice" placeholder="Auto-fetch" min="0.01" step="0.01" inputmode="decimal" aria-label="Optional price per share in US dollars"
+                       class="number-input bg-slate-950 border border-slate-700 text-xs pl-6 pr-2.5 py-2 rounded text-white w-36 text-right font-mono tabular-nums focus:outline-none focus:border-cyan-500">
+              </span>
+            </label>
+            <button type="button" onclick="addCashStockFromUI()" class="bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold px-3 py-2 rounded transition">
               + Add Holding
             </button>
           </div>
