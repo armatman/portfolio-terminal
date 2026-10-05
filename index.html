@@ -10,66 +10,92 @@
   <script src="app.js" defer></script>
 </head>
 <body class="p-4 md:p-8">
+  <div id="toastContainer" class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
   <div class="max-w-5xl mx-auto space-y-6">
     
     <!-- Top Bar: Status, Keys, GitHub Gist Sync, Reset & Backups -->
-    <div class="border-card p-4 rounded-lg flex flex-wrap items-center justify-between gap-4">
-      <div>
-        <div class="flex items-center gap-2">
-          <h1 class="text-xl font-bold text-emerald-400 tracking-wider">MARGIN DESK TERMINAL</h1>
-          <span class="bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-black px-2 py-0.5 rounded tracking-wide">
-            TRADERNET AR COMPLIANT
-          </span>
-          <span id="cloudStatusBadge" class="bg-slate-900 text-slate-400 border border-slate-700 text-[10px] font-black px-2 py-0.5 rounded tracking-wide flex items-center gap-1">
-            <span class="w-1.5 h-1.5 rounded-full bg-slate-500" id="cloudStatusDot"></span>
-            <span id="cloudStatusText">GIST: IDLE</span>
-          </span>
+    <div class="border-card p-4 rounded-lg space-y-4">
+      <div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <h1 class="text-xl font-bold text-emerald-400 tracking-wider">MARGIN DESK TERMINAL</h1>
+            <span class="bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-black px-2 py-0.5 rounded tracking-wide">
+              TRADERNET AR COMPLIANT
+            </span>
+            <span id="cloudStatusBadge" class="bg-slate-900 text-slate-400 border border-slate-700 text-[10px] font-black px-2 py-0.5 rounded tracking-wide flex items-center gap-1">
+              <span class="w-1.5 h-1.5 rounded-full bg-slate-500" id="cloudStatusDot"></span>
+              <span id="cloudStatusText">GIST: IDLE</span>
+            </span>
+          </div>
+          <p class="text-xs text-slate-400 mt-0.5" id="rulesSummary">
+            Tradernet AR Rules: 15.00% p.a. (0.0411%/d) | 4:00 AM AMT (UTC+4) Compounding | D_min 10%
+          </p>
         </div>
-        <p class="text-xs text-slate-400 mt-0.5" id="rulesSummary">
-          Tradernet AR Rules: 15.00% p.a. (0.0411%/d) | 4:00 AM AMT (UTC+4) Compounding | D_min 10%
-        </p>
       </div>
-      
-      <div class="flex flex-wrap items-center gap-2">
-        <input id="apiKeyInput" type="password" placeholder="Gemini Studio Key" 
-               class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-emerald-500 w-32 text-slate-200">
-        
-        <input id="finnhubKeyInput" type="password" placeholder="Finnhub Key" 
-               title="Free key from finnhub.io for direct real-time quotes"
-               class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-cyan-500 w-24 text-slate-200">
 
-        <input id="gistIdInput" type="text" placeholder="Gist ID or URL" 
-               title="Paste your Secret Gist ID (e.g. 3f8b92c4a1b2c3d4e5f6...)"
-               class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-purple-500 w-36 text-slate-200">
+      <div class="space-y-3">
+        <div class="flex flex-wrap items-end gap-2">
+          <div id="headerCredentialsFields" class="flex flex-wrap items-end gap-2">
+          <div class="flex flex-col gap-1 min-w-[120px]">
+            <label class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Gemini</label>
+            <input id="apiKeyInput" type="text" placeholder="Studio Key" 
+                   class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-emerald-500 w-32 text-slate-200">
+          </div>
 
-        <input id="githubTokenInput" type="password" placeholder="GitHub Token (ghp_...)" 
-               title="GitHub Personal Access Token with 'gist' scope"
-               class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-purple-500 w-36 text-slate-200">
+          <div class="flex flex-col gap-1 min-w-[96px]">
+            <label class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Finnhub</label>
+            <input id="finnhubKeyInput" type="text" placeholder="Key" 
+                   title="Free key from finnhub.io for direct real-time quotes"
+                   class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-cyan-500 w-24 text-slate-200">
+          </div>
 
-        <button onclick="saveApiKeys()" class="bg-emerald-600 hover:bg-emerald-500 text-black text-xs font-bold px-3 py-2 rounded transition" title="Save keys and pull latest cloud state">
-          Save Keys
-        </button>
+          <div class="flex flex-col gap-1 min-w-[150px]">
+            <label class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Gist</label>
+            <input id="gistIdInput" type="text" placeholder="ID or URL" 
+                   title="Paste your Secret Gist ID (e.g. 3f8b92c4a1b2c3d4e5f6...)"
+                   class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-purple-500 w-36 text-slate-200">
+          </div>
 
-        <button onclick="pullCloudAndRewriteLocal()" class="bg-slate-800 hover:bg-slate-700 border border-purple-600 text-purple-300 text-xs font-bold px-3 py-2 rounded transition flex items-center gap-1" title="Force pull cloud data and rewrite local storage">
-          <span>☁↓</span> Pull
-        </button>
+          <div class="flex flex-col gap-1 min-w-[170px]">
+            <label class="text-[10px] uppercase tracking-[0.18em] text-slate-500">GitHub</label>
+            <input id="githubTokenInput" type="text" placeholder="Token" 
+                   title="GitHub Personal Access Token with 'gist' scope"
+                   class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-purple-500 w-36 text-slate-200">
+          </div>
+          </div>
 
-        <button onclick="refreshAllLivePrices()" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-cyan-300 text-xs font-bold px-3 py-2 rounded transition flex items-center gap-1">
-          <span>↻</span> Quotes
-        </button>
+          <div class="flex flex-wrap items-center gap-2 ml-auto">
+            <button id="toggleHeaderCredentialsButton" onclick="toggleHeaderCredentialsVisibility()" aria-expanded="true" class="hidden bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 text-xs font-bold px-3 py-2 rounded transition" title="Hide credential inputs">
+              Hide keys
+            </button>
+            <button id="saveApiKeysButton" onclick="saveApiKeys()" class="bg-emerald-600 hover:bg-emerald-500 text-black text-xs font-bold px-3 py-2 rounded transition" title="Save keys and pull latest cloud state">
+              Save
+            </button>
 
-        <button onclick="exportBackupJSON()" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 text-xs font-bold px-3 py-2 rounded transition" title="Export portfolio state to JSON file">
-          Export
-        </button>
-        
-        <label class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-purple-300 text-xs font-bold px-3 py-2 rounded transition cursor-pointer" title="Import JSON file & overwrite Gist immediately">
-          Import
-          <input type="file" id="importFileInput" class="hidden" accept=".json" onchange="importBackupJSON(event)">
-        </label>
+            <button onclick="pullCloudAndRewriteLocal()" class="bg-slate-800 hover:bg-slate-700 border border-purple-600 text-purple-300 text-xs font-bold px-3 py-2 rounded transition flex items-center gap-1" title="Force pull cloud data and rewrite local storage">
+              <span>☁↓</span> Pull
+            </button>
+          </div>
+        </div>
 
-        <button onclick="resetToBlankState()" class="bg-rose-950/60 hover:bg-rose-900 border border-rose-800 text-rose-300 text-xs font-bold px-3 py-2 rounded transition" title="Clear all local data and return to blank slate">
-          Reset
-        </button>
+        <div class="flex flex-wrap items-center justify-center gap-2">
+          <button onclick="refreshAllLivePrices()" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-cyan-300 text-xs font-bold px-3 py-2 rounded transition flex items-center gap-1">
+            <span>↻</span> Quotes
+          </button>
+
+          <button onclick="exportBackupJSON()" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 text-xs font-bold px-3 py-2 rounded transition" title="Export portfolio state to JSON file">
+            Export
+          </button>
+          
+          <label class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-purple-300 text-xs font-bold px-3 py-2 rounded transition cursor-pointer" title="Import JSON file & overwrite Gist immediately">
+            Import
+            <input type="file" id="importFileInput" class="hidden" accept=".json" onchange="importBackupJSON(event)">
+          </label>
+
+          <button onclick="resetToBlankState()" class="bg-rose-950/60 hover:bg-rose-900 border border-rose-800 text-rose-300 text-xs font-bold px-3 py-2 rounded transition" title="Clear all local data and return to blank slate">
+            Reset
+          </button>
+        </div>
       </div>
     </div>
 
@@ -84,6 +110,20 @@
 
       <!-- Main Board Content -->
       <div id="mainDeskContainer" class="space-y-4">
+        <div id="emptyStatePanel" class="hidden border border-dashed border-slate-700 bg-slate-900/40 rounded-lg p-4">
+          <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div class="text-lg font-black text-slate-100 tracking-wide">NO ACTIVE MARGIN POSITIONS</div>
+              <p class="text-xs text-slate-400 mt-1">Start with a trade, add a cash stock, or restore a saved backup to continue.</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button onclick="document.getElementById('cmdInput').value='bought 10 AAPL for 100'; document.getElementById('cmdInput').focus();" class="bg-emerald-600 hover:bg-emerald-500 text-black text-[11px] font-bold px-3 py-1.5 rounded transition">Quick Buy</button>
+              <button onclick="document.getElementById('cmdInput').value='add cash stock 10 AAPL'; document.getElementById('cmdInput').focus();" class="bg-cyan-700 hover:bg-cyan-600 text-white text-[11px] font-bold px-3 py-1.5 rounded transition">Add Cash Stock</button>
+              <button onclick="document.getElementById('importFileInput').click()" class="bg-slate-800 hover:bg-slate-700 text-purple-300 text-[11px] font-bold px-3 py-1.5 rounded border border-purple-700 transition">Import Backup</button>
+            </div>
+          </div>
+        </div>
+
         <div class="text-2xl font-black text-white" id="boardTitle">COMBINED PORTFOLIO</div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-300">
@@ -123,25 +163,25 @@
       <div id="cashCushionContainer" class="hidden space-y-4">
         <div class="flex justify-between items-center border-b border-slate-800 pb-2">
           <div>
-            <h2 class="text-lg font-black text-cyan-400 tracking-wide">CASH & COLLATERAL CUSHION</h2>
-            <p class="text-xs text-slate-400">Unleveraged cash and fully-paid stock holdings automatically updated via online feeds.</p>
+            <h2 class="text-lg font-black text-cyan-400 tracking-wide">CURRENT BALANCE / MARGIN DEBT</h2>
+            <p class="text-xs text-slate-400">Enter a positive balance or negative margin debt; non-margin holdings are tracked separately.</p>
           </div>
           <div class="text-right">
-            <span class="text-xs text-slate-500 block">Total Cushion Value</span>
+            <span class="text-xs text-slate-500 block">Cash + Holdings</span>
             <span class="text-xl font-bold text-cyan-300 font-mono" id="cushionTotalValue">$0.00</span>
           </div>
         </div>
 
-        <!-- Free Uninvested Cash Setting -->
+        <!-- Current Balance Setting -->
         <div class="bg-slate-900/60 p-3 rounded border border-slate-800 flex items-center justify-between">
           <div>
-            <span class="text-xs font-bold text-white block">Free Uninvested Cash ($)</span>
-            <span class="text-[11px] text-slate-500">Liquid USD sitting in broker account balance</span>
+            <span class="text-xs font-bold text-white block">Current Balance / Margin Debt</span>
+            <span id="cashBalanceDebtMeta" class="text-[11px] text-slate-500">Balance: $0.00 | Debt: -$0.00</span>
           </div>
           <div class="flex items-center gap-2">
-            <input type="number" id="freeCashInput" step="50" min="0" placeholder="0.00" 
+            <input type="number" id="freeCashInput" step="0.01" placeholder="Positive = balance, negative = debt" 
                    class="bg-slate-950 border border-slate-700 text-xs px-3 py-1.5 rounded w-36 text-right text-emerald-400 font-mono font-bold focus:outline-none focus:border-cyan-500">
-            <button onclick="saveFreeCashFromInput()" class="bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-bold px-3 py-1.5 rounded border border-slate-600 transition">
+            <button onclick="saveCurrentBalanceFromInput()" class="bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-bold px-3 py-1.5 rounded border border-slate-600 transition">
               Update
             </button>
           </div>
@@ -150,7 +190,7 @@
         <!-- Cash Stocks List -->
         <div class="space-y-2">
           <div class="flex justify-between items-center">
-            <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Unleveraged / Cash Stocks</span>
+            <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Non-Margin Holdings</span>
             <span class="text-[11px] text-emerald-400 font-semibold">● Auto-syncs live market prices</span>
           </div>
 
@@ -175,7 +215,7 @@
             <input type="number" id="newCashShares" placeholder="Shares" class="bg-slate-950 border border-slate-700 text-xs px-2.5 py-1.5 rounded text-white w-24 text-right">
             <input type="number" id="newCashPrice" step="0.01" placeholder="Price (Optional - auto-fetches)" class="bg-slate-950 border border-slate-700 text-xs px-2.5 py-1.5 rounded text-white w-48 text-right">
             <button onclick="addCashStockFromUI()" class="bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold px-3 py-1.5 rounded transition">
-              + Add Cash Holding
+              + Add Holding
             </button>
           </div>
         </div>
@@ -208,8 +248,8 @@
         <p class="text-[10px] text-slate-500 uppercase tracking-wider mb-2 font-bold">Quick Commands Guide</p>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2 text-xs text-slate-400">
           <div><span class="text-emerald-400 font-bold">Buy Shares:</span> bought 20 JBL for 290, pt 305</div>
-          <div><span class="text-cyan-400 font-bold">Cash Stock (Auto-price):</span> add cash stock 50 AAPL <span class="text-slate-600 italic">or</span> remove cash stock AAPL</div>
-          <div><span class="text-cyan-400 font-bold">Free Cash:</span> free cash 5000 <span class="text-slate-600 italic">or</span> cash 3500</div>
+          <div><span class="text-cyan-400 font-bold">Non-Margin Holding:</span> add cash stock 50 AAPL <span class="text-slate-600 italic">or</span> remove cash stock AAPL</div>
+          <div><span class="text-cyan-400 font-bold">Balance / Margin Debt:</span> balance 5000 <span class="text-slate-600 italic">or</span> balance -5000</div>
           <div><span class="text-purple-400 font-bold">Ladder Exit:</span> sell 10 JBL for 305 today and 10 for 315 in 7 days</div>
           <div><span class="text-cyan-400 font-bold">Exit Comparison:</span> sell today for 300 vs sell 10 days later for 310</div>
           <div><span class="text-amber-400 font-bold">Live Market Quote:</span> quote JBL <span class="text-slate-600 italic">or</span> what's the current JBL price?</div>

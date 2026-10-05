@@ -241,6 +241,34 @@ async function loadSavedState() {
   renderBoard();
 }
 
+let headerCredentialsHidden = false;
+
+function updateHeaderCredentialsVisibility() {
+  const inputIds = ['apiKeyInput', 'finnhubKeyInput', 'gistIdInput', 'githubTokenInput'];
+  const inputs = inputIds.map(id => document.getElementById(id));
+  const allFieldsFilled = inputs.every(input => input.value.trim().length > 0);
+  const fields = document.getElementById('headerCredentialsFields');
+  const toggleButton = document.getElementById('toggleHeaderCredentialsButton');
+  const saveButton = document.getElementById('saveApiKeysButton');
+
+  if (!allFieldsFilled) headerCredentialsHidden = false;
+  fields.classList.toggle('hidden', headerCredentialsHidden);
+  toggleButton.classList.toggle('hidden', !allFieldsFilled);
+  saveButton.classList.toggle('hidden', headerCredentialsHidden);
+  toggleButton.textContent = headerCredentialsHidden ? 'Show keys' : 'Hide keys';
+  toggleButton.title = headerCredentialsHidden ? 'Show credential inputs' : 'Hide credential inputs';
+  toggleButton.setAttribute('aria-expanded', String(!headerCredentialsHidden));
+  const actionButtons = toggleButton.parentElement;
+  actionButtons.classList.toggle('ml-auto', !headerCredentialsHidden);
+  actionButtons.classList.toggle('mx-auto', headerCredentialsHidden);
+  localStorage.setItem('header_credentials_hidden', String(headerCredentialsHidden));
+}
+
+function toggleHeaderCredentialsVisibility() {
+  headerCredentialsHidden = !headerCredentialsHidden;
+  updateHeaderCredentialsVisibility();
+}
+
 function saveState() {
   state.lastUpdated = Date.now();
   localStorage.setItem('margin_portfolio_state_dynamic_v2', JSON.stringify(state));
@@ -254,6 +282,7 @@ function resetToBlankState() {
     pushStateToGist(true);
     renderBoard();
     logTerminal("[System]: Portfolio reset to a clean blank slate.");
+    showToast('Portfolio reset to a blank slate.', 'warning');
   }
 }
 
@@ -272,6 +301,7 @@ async function saveApiKeys() {
   localStorage.setItem('github_pat_token', token);
 
   logTerminal("[System]: Credentials saved.");
+  showToast(cleanGistId ? 'Credentials saved and synced.' : 'Credentials saved locally.', 'success');
   if (cleanGistId) {
     await pullCloudAndRewriteLocal();
   }
@@ -412,6 +442,7 @@ function renderBoard() {
   tabsContainer.innerHTML = '';
 
   const isCushionActive = state.activeView === "CASH_CUSHION";
+  updateEmptyStateVisibility(tickers.length === 0 && !isCushionActive);
 
   if (tickers.length === 0) {
     if (!isCushionActive) state.activeView = "COMBINED";
@@ -449,7 +480,7 @@ function renderBoard() {
   const cushionTotal = getCashCushionTotal();
   const cushionBtn = document.createElement('button');
   cushionBtn.className = `px-3 py-1 rounded text-xs font-bold transition flex items-center gap-1.5 ${isCushionActive ? 'bg-cyan-500 text-black' : 'bg-slate-900 border border-cyan-800/60 text-cyan-400 hover:bg-slate-800'}`;
-  cushionBtn.innerHTML = `<span>🛡️ CASH CUSHION</span> <span class="text-[10px] px-1.5 py-0.2 rounded ${isCushionActive ? 'bg-cyan-800 text-white' : 'bg-cyan-950 text-cyan-300 font-mono'}">+$${cushionTotal.toLocaleString('en-US', {maximumFractionDigits:0})}</span>`;
+  cushionBtn.innerHTML = `<span>🛡️ BALANCE</span> <span class="text-[10px] px-1.5 py-0.2 rounded ${isCushionActive ? 'bg-cyan-800 text-white' : 'bg-cyan-950 text-cyan-300 font-mono'}">+$${cushionTotal.toLocaleString('en-US', {maximumFractionDigits:0})}</span>`;
   cushionBtn.onclick = () => setActiveView("CASH_CUSHION");
   tabsContainer.appendChild(cushionBtn);
 
@@ -479,7 +510,13 @@ function renderBoard() {
 function renderCashCushionPanel() {
   if (!state.cashCushion) state.cashCushion = { freeCash: 0.00, holdings: [] };
   const freeCash = Number(state.cashCushion.freeCash) || 0;
-  document.getElementById('freeCashInput').value = freeCash.toFixed(2);
+  const marginDebt = Math.abs(Number(state.marginBalance) || 0);
+  const signedBalance = freeCash + (Number(state.marginBalance) || 0);
+  document.getElementById('freeCashInput').value = signedBalance.toFixed(2);
+  const debtMeta = document.getElementById('cashBalanceDebtMeta');
+  if (debtMeta) {
+    debtMeta.textContent = `Balance: $${formatUSD(freeCash)} | Debt: -$${formatUSD(marginDebt)}`;
+  }
 
   const tableBody = document.getElementById('cashStocksTableBody');
   tableBody.innerHTML = '';
@@ -513,12 +550,23 @@ function renderCashCushionPanel() {
   document.getElementById('cushionTotalValue').innerText = `$${formatUSD(totalCushion)}`;
 }
 
-function saveFreeCashFromInput() {
-  const val = parseFloat(document.getElementById('freeCashInput').value) || 0;
-  state.cashCushion.freeCash = val;
+function setCurrentBalance(value) {
+  const signedBalance = Number.isFinite(Number(value)) ? Number(value) : 0;
+  state.cashCushion.freeCash = Math.max(0, signedBalance);
+  state.marginBalance = Math.min(0, signedBalance);
+  return {
+    balance: Math.max(0, signedBalance),
+    debt: Math.max(0, -signedBalance)
+  };
+}
+
+function saveCurrentBalanceFromInput() {
+  const inputValue = parseFloat(document.getElementById('freeCashInput').value);
+  const { balance, debt } = setCurrentBalance(inputValue);
   saveState();
   renderBoard();
-  logTerminal(`[Cash Cushion]: Free uninvested cash updated to $${formatUSD(val)}.`);
+  logTerminal(`[Balance]: Current balance/debt updated. Balance: $${formatUSD(balance)} | Margin debt: -$${formatUSD(debt)}.`);
+  showToast(`Balance $${formatUSD(balance)} | Debt -$${formatUSD(debt)}`, 'success');
 }
 
 async function addCashStockFromUI() {
@@ -553,7 +601,8 @@ async function addCashStockFromUI() {
 
   saveState();
   renderBoard();
-  logTerminal(`[Cash Cushion]: Added ${shares} ${ticker}. Fetching live online quote...`);
+  logTerminal(`[Balance]: Added ${shares} ${ticker}. Fetching live online quote...`);
+  showToast(`${shares} ${ticker} added to balance holdings.`, 'success');
   await fetchLivePrice(ticker);
 }
 
@@ -564,6 +613,7 @@ function removeCashStock(index) {
   renderBoard();
   if (removed.length > 0) {
     logTerminal(`[Cash Cushion]: Removed ${removed[0].ticker} from cash holdings.`);
+    showToast(`${removed[0].ticker} removed from cash holdings.`, 'info');
   }
 }
 
@@ -764,6 +814,34 @@ function renderProjectionTable(gross, totalComms, debtToUse, marginChargedToUse,
   } else {
     tableBody.innerHTML = `<tr><td colspan="5" class="py-4 text-center text-slate-500 italic">No active position to project.</td></tr>`;
   }
+}
+
+function showToast(message, type = 'info') {
+  const container = document.getElementById('toastContainer');
+  if (!container) return;
+
+  const toast = document.createElement('div');
+  const palette = {
+    success: 'border-emerald-500/60 bg-emerald-950/80 text-emerald-200',
+    error: 'border-rose-500/60 bg-rose-950/80 text-rose-200',
+    warning: 'border-amber-500/60 bg-amber-950/80 text-amber-200',
+    info: 'border-sky-500/60 bg-sky-950/80 text-sky-200'
+  };
+
+  toast.className = `border rounded-lg px-3 py-2 text-xs font-semibold shadow-lg backdrop-blur-sm ${palette[type] || palette.info}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.classList.add('opacity-0', 'translate-y-1');
+    setTimeout(() => toast.remove(), 220);
+  }, 2600);
+}
+
+function updateEmptyStateVisibility(isEmpty) {
+  const panel = document.getElementById('emptyStatePanel');
+  if (!panel) return;
+  panel.classList.toggle('hidden', !isEmpty);
 }
 
 function logTerminal(content, isUser = false, isHtml = false) {
@@ -1175,6 +1253,7 @@ async function applyPortfolioActions(action) {
 
     saveState();
     logTerminal(`[Executed Buy]: Added ${shares} ${ticker} @ $${formatUSD(price)}. Outlay: $${formatUSD(totalOutlay)} (Comm: $${formatUSD(buyComm)}). Funded: $${formatUSD(cashUsed)} cash | +$${formatUSD(debtAdded)} margin debt. Free Cash remaining: $${formatUSD(state.cashCushion.freeCash)}. Total Margin Debt: -$${formatUSD(Math.abs(state.marginBalance))}.`);
+    showToast(`${shares} ${ticker} bought at $${formatUSD(price)}.`, 'success');
   } 
   else if (action.action === "sell") {
     const ticker = action.ticker.toUpperCase();
@@ -1221,6 +1300,8 @@ async function applyPortfolioActions(action) {
       state.cashCushion.freeCash = (Number(state.cashCushion.freeCash) || 0) + cashSurplus;
     }
 
+    const resultMessage = `${sharesToSell} ${ticker} sold at $${formatUSD(sellPrice)}.`;
+
     if (isCashHolding) {
       if (sharesToSell >= pos.shares) {
         state.cashCushion.holdings.splice(cashHoldingIdx, 1);
@@ -1245,6 +1326,7 @@ async function applyPortfolioActions(action) {
     }
 
     saveState();
+    showToast(resultMessage, 'success');
   }
   else if (action.action === "set_pt") {
     const ticker = (action.ticker ? action.ticker.toUpperCase() : null) || (state.activeView !== "COMBINED" && state.activeView !== "CASH_CUSHION" ? state.activeView : Object.keys(state.positions)[0]);
@@ -1286,9 +1368,9 @@ async function applyPortfolioActions(action) {
     logTerminal(`[Margin Synced]: Total margin balance explicitly set to -$${formatUSD(Math.abs(state.marginBalance))}.`);
   }
   else if (action.action === "set_free_cash") {
-    state.cashCushion.freeCash = Number(action.amount);
+    const { balance, debt } = setCurrentBalance(action.amount);
     saveState();
-    logTerminal(`[Cash Cushion]: Free uninvested cash set to $${formatUSD(action.amount)}.`);
+    logTerminal(`[Balance]: Current balance/debt updated. Balance: $${formatUSD(balance)} | Margin debt: -$${formatUSD(debt)}.`);
   }
   else if (action.action === "add_cash_stock") {
     const ticker = action.ticker.toUpperCase();
@@ -1307,7 +1389,7 @@ async function applyPortfolioActions(action) {
       state.cashCushion.holdings.push({ ticker, shares, price: priceToUse });
     }
     saveState();
-    logTerminal(`[Cash Cushion]: Added ${shares} ${ticker} to cash collateral. Syncing online quote...`);
+    logTerminal(`[Balance]: Added ${shares} ${ticker} to balance holdings. Syncing online quote...`);
     renderBoard();
     await fetchLivePrice(ticker);
     return;
@@ -1317,7 +1399,7 @@ async function applyPortfolioActions(action) {
     if (state.cashCushion && state.cashCushion.holdings) {
       state.cashCushion.holdings = state.cashCushion.holdings.filter(h => h.ticker !== ticker);
       saveState();
-      logTerminal(`[Cash Cushion]: Removed ${ticker} from cash holdings.`);
+      logTerminal(`[Balance]: Removed ${ticker} from balance holdings.`);
     }
   }
 
@@ -1346,6 +1428,7 @@ async function executeCommand() {
   const apiKey = localStorage.getItem('gemini_api_key');
   if (!apiKey) {
     logTerminal("[Error]: Missing API Key. Enter your Google AI Studio key above.");
+    showToast('Missing Gemini API key.', 'error');
     return;
   }
 
@@ -1379,7 +1462,7 @@ Classify intent into ONE JSON structure (NO markdown backticks, raw JSON only):
   "ticker": "<ticker symbol>"
 }
 
-3. SET FREE UNINVESTED CASH (e.g. "free cash 5000", "cash 3500", "set cash 10000"):
+3. SET CURRENT BALANCE OR MARGIN DEBT (positive for balance, negative for debt; e.g. "balance 5000", "balance -5000"):
 {
   "intent": "action",
   "action": "set_free_cash",
@@ -1563,5 +1646,10 @@ Classify intent into ONE JSON structure (NO markdown backticks, raw JSON only):
 
 window.onload = async () => {
   await loadSavedState();
+  headerCredentialsHidden = localStorage.getItem('header_credentials_hidden') === 'true';
+  ['apiKeyInput', 'finnhubKeyInput', 'gistIdInput', 'githubTokenInput'].forEach(id => {
+    document.getElementById(id).addEventListener('input', updateHeaderCredentialsVisibility);
+  });
+  updateHeaderCredentialsVisibility();
   await refreshAllLivePrices();
 };
