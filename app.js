@@ -39,6 +39,12 @@ function createBlankState() {
 
 let state = createBlankState();
 let gistSyncTimeout = null;
+let quoteRefreshTimer = null;
+let isRefreshingLivePrices = false;
+
+const QUOTE_REFRESH_INTERVAL_KEY = 'quote_refresh_interval_ms';
+const DEFAULT_QUOTE_REFRESH_INTERVAL_MS = 15 * 1000;
+const QUOTE_REFRESH_INTERVALS = new Set([0, 15 * 1000, 30 * 1000, 60 * 1000]);
 
 // ==========================================
 // GITHUB GIST ENCODING & REPLICATION ENGINE
@@ -936,18 +942,42 @@ async function fetchLivePrice(ticker, silent = false) {
 }
 
 async function refreshAllLivePrices() {
+  if (isRefreshingLivePrices) return;
+
   const marginSymbols = Object.keys(state.positions);
   const cashSymbols = (state.cashCushion?.holdings || []).map(h => h.ticker);
   const allSymbols = Array.from(new Set([...marginSymbols, ...cashSymbols]));
 
   if (allSymbols.length === 0) return;
 
-  logTerminal(`[System]: Polling live quotes for ${allSymbols.join(', ')}...`);
-  for (const sym of allSymbols) {
-    await fetchLivePrice(sym, true);
+  isRefreshingLivePrices = true;
+  try {
+    logTerminal(`[System]: Polling live quotes for ${allSymbols.join(', ')}...`);
+    for (const sym of allSymbols) {
+      await fetchLivePrice(sym, true);
+    }
+    renderBoard();
+    logTerminal(`[System]: Live market quotes refreshed for all assets.`);
+  } finally {
+    isRefreshingLivePrices = false;
   }
-  renderBoard();
-  logTerminal(`[System]: Live market quotes refreshed for all assets.`);
+}
+
+function setQuoteRefreshInterval(interval) {
+  const intervalMs = Number(interval);
+  if (!QUOTE_REFRESH_INTERVALS.has(intervalMs)) {
+    throw new Error(`Unsupported quote refresh interval: ${interval}`);
+  }
+
+  if (quoteRefreshTimer) clearInterval(quoteRefreshTimer);
+  quoteRefreshTimer = null;
+  localStorage.setItem(QUOTE_REFRESH_INTERVAL_KEY, String(intervalMs));
+
+  if (intervalMs > 0) {
+    quoteRefreshTimer = setInterval(() => {
+      document.getElementById('refreshQuotesButton').click();
+    }, intervalMs);
+  }
 }
 
 function exportBackupJSON() {
@@ -1650,6 +1680,15 @@ window.onload = async () => {
   ['apiKeyInput', 'finnhubKeyInput', 'gistIdInput', 'githubTokenInput'].forEach(id => {
     document.getElementById(id).addEventListener('input', updateHeaderCredentialsVisibility);
   });
+  const quoteRefreshInterval = document.getElementById('quoteRefreshInterval');
+  const savedQuoteRefreshInterval = localStorage.getItem(QUOTE_REFRESH_INTERVAL_KEY);
+  const parsedQuoteRefreshInterval = savedQuoteRefreshInterval === null ? NaN : Number(savedQuoteRefreshInterval);
+  const initialQuoteRefreshInterval = QUOTE_REFRESH_INTERVALS.has(parsedQuoteRefreshInterval)
+    ? parsedQuoteRefreshInterval
+    : DEFAULT_QUOTE_REFRESH_INTERVAL_MS;
+  quoteRefreshInterval.value = String(initialQuoteRefreshInterval);
+  quoteRefreshInterval.addEventListener('change', () => setQuoteRefreshInterval(quoteRefreshInterval.value));
+  setQuoteRefreshInterval(initialQuoteRefreshInterval);
   updateHeaderCredentialsVisibility();
   await refreshAllLivePrices();
 };

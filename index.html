@@ -79,9 +79,18 @@
         </div>
 
         <div class="flex flex-wrap items-center justify-center gap-2">
-          <button onclick="refreshAllLivePrices()" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-cyan-300 text-xs font-bold px-3 py-2 rounded transition flex items-center gap-1">
+          <button id="refreshQuotesButton" onclick="refreshAllLivePrices()" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-cyan-300 text-xs font-bold px-3 py-2 rounded transition flex items-center gap-1">
             <span>↻</span> Quotes
           </button>
+          <label class="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500">
+            Auto
+            <select id="quoteRefreshInterval" class="bg-slate-900 border border-slate-700 text-xs px-2 py-2 rounded text-slate-300 focus:outline-none focus:border-cyan-500" aria-label="Automatic quote refresh interval">
+              <option value="0">Off</option>
+              <option value="15000">15 sec</option>
+              <option value="30000">30 sec</option>
+              <option value="60000">1 min</option>
+            </select>
+          </label>
 
           <button onclick="exportBackupJSON()" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 text-xs font-bold px-3 py-2 rounded transition" title="Export portfolio state to JSON file">
             Export
