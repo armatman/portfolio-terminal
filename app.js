@@ -1,19 +1,22 @@
 // ==========================================
-// TRADERNET ARMENIA (FREEDOM BROKER) RULES
+// USER-CONFIGURABLE BROKER DEFAULT ASSUMPTIONS
 // ==========================================
-const TRADERNET_RULES = {
+const DEFAULT_TRADERNET_RULES = {
   broker: "Freedom Broker Armenia (Tradernet)",
-  annualRate: 0.1500,                  // 15.00% annual margin interest
-  dailyRate: 0.1500 / 365,             // 0.04109589% daily rate
-  rolloverHour: 4,                     // 4:00 AM AMT (UTC+4) daily overnight cycle
-  maintenanceMarginRatio: 0.10,        // Tradernet standard D_min discount = 10%
-  stopOutRatio: 0.00,                  // Absolute liquidation at 0 equity
-  commPerShare: 0.012,                 // $0.012 per share
-  commVolumePct: 0.0012,               // 0.12% trade value
-  minCommOrder: 1.20                   // $1.20 minimum per execution
+  annualRate: 0.1500,                  // Default: 15.00% annual margin interest
+  dayCountBasis: 365,
+  rolloverHour: 4,                     // Default: 4:00 AM in Asia/Yerevan
+  rolloverMinute: 0,
+  rolloverTimeZone: "Asia/Yerevan",
+  maintenanceMarginRatio: 0.10,        // Default maintenance equity ratio
+  stopOutRatio: 0.00,                  // Default stop-out equity ratio
+  commPerShare: 0.012,                 // Default: $0.012 per share
+  commVolumePct: 0.0012,               // Default: 0.12% trade value
+  minCommOrder: 1.20                   // Default: $1.20 minimum per execution
 };
 
-const DAILY_RATE = TRADERNET_RULES.dailyRate;
+const TRADERNET_RULES = { ...DEFAULT_TRADERNET_RULES };
+const TRADERNET_RULES_STORAGE_KEY = 'tradernet_rules_v1';
 const GIST_FILE_NAME = "margin_state.json";
 
 function formatUSD(val) {
@@ -33,8 +36,32 @@ function createBlankState() {
       freeCash: 0.00,
       holdings: []
     },
+    quoteSymbols: {},
     positions: {}
   };
+}
+
+function normalizePortfolioState(candidate) {
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    throw new Error('Portfolio state must be an object.');
+  }
+
+  const blankState = createBlankState();
+  const normalized = { ...blankState, ...candidate };
+  normalized.cashCushion = {
+    ...blankState.cashCushion,
+    ...(candidate.cashCushion && typeof candidate.cashCushion === 'object' ? candidate.cashCushion : {})
+  };
+  if (!Array.isArray(normalized.cashCushion.holdings)) normalized.cashCushion.holdings = [];
+  if (!normalized.positions || typeof normalized.positions !== 'object' || Array.isArray(normalized.positions)) {
+    normalized.positions = {};
+  }
+  if (!normalized.quoteSymbols || typeof normalized.quoteSymbols !== 'object' || Array.isArray(normalized.quoteSymbols)) {
+    normalized.quoteSymbols = {};
+  }
+  if (!Number.isFinite(Number(normalized.lastRolloverTimestamp))) normalized.lastRolloverTimestamp = Date.now();
+  if (!normalized.startDate) normalized.startDate = blankState.startDate;
+  return normalized;
 }
 
 let state = createBlankState();
@@ -181,12 +208,7 @@ async function pullStateFromGistOnLoad() {
     }
 
     if (remoteState && typeof remoteState === 'object') {
-      if (!remoteState.positions || typeof remoteState.positions !== 'object') remoteState.positions = {};
-      if (remoteState.marginBalance === undefined) remoteState.marginBalance = 0.00;
-      if (!remoteState.cashCushion) remoteState.cashCushion = { freeCash: 0.00, holdings: [] };
-      if (!remoteState.startDate) remoteState.startDate = new Date().toISOString().split('T')[0];
-      
-      state = remoteState;
+      state = normalizePortfolioState(remoteState);
       localStorage.setItem('margin_portfolio_state_dynamic_v2', JSON.stringify(state));
 
       setGistStatus('synced', 'ONLINE');
@@ -216,6 +238,7 @@ async function pullCloudAndRewriteLocal() {
 }
 
 async function loadSavedState() {
+  loadTradernetRules();
   const savedKey = localStorage.getItem('gemini_api_key');
   if (savedKey) document.getElementById('apiKeyInput').value = savedKey;
 
@@ -235,12 +258,11 @@ async function loadSavedState() {
       try {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object') {
-          state = parsed;
-          if (!state.cashCushion) state.cashCushion = { freeCash: 0.00, holdings: [] };
-          if (!state.positions) state.positions = {};
-          if (!state.startDate) state.startDate = new Date().toISOString().split('T')[0];
+          state = normalizePortfolioState(parsed);
         }
-      } catch (e) {}
+      } catch (error) {
+        logTerminal(`[Local State Error]: Could not load saved portfolio (${error.message}). Starting with defaults.`);
+      }
     }
   }
 
@@ -320,39 +342,258 @@ function calcCommission(shares, totalVal) {
   return Math.max(TRADERNET_RULES.minCommOrder, (TRADERNET_RULES.commPerShare * shares) + (TRADERNET_RULES.commVolumePct * totalVal));
 }
 
+function getDailyRate() {
+  return TRADERNET_RULES.annualRate / TRADERNET_RULES.dayCountBasis;
+}
+
+function loadTradernetRules() {
+  const stored = localStorage.getItem(TRADERNET_RULES_STORAGE_KEY);
+  if (!stored) return;
+
+  try {
+    const savedRules = JSON.parse(stored);
+    const candidates = {
+      annualRate: Number(savedRules.annualRate),
+      dayCountBasis: savedRules.dayCountBasis === undefined ? DEFAULT_TRADERNET_RULES.dayCountBasis : Number(savedRules.dayCountBasis),
+      maintenanceMarginRatio: Number(savedRules.maintenanceMarginRatio),
+      stopOutRatio: Number(savedRules.stopOutRatio),
+      rolloverHour: Number(savedRules.rolloverHour),
+      rolloverMinute: Number(savedRules.rolloverMinute),
+      commPerShare: Number(savedRules.commPerShare),
+      commVolumePct: Number(savedRules.commVolumePct),
+      minCommOrder: Number(savedRules.minCommOrder)
+    };
+    const valid = Number.isFinite(candidates.annualRate) && candidates.annualRate >= 0 && candidates.annualRate <= 1 &&
+      [360, 365].includes(candidates.dayCountBasis) &&
+      Number.isFinite(candidates.maintenanceMarginRatio) && candidates.maintenanceMarginRatio >= 0 && candidates.maintenanceMarginRatio < 1 &&
+      Number.isFinite(candidates.stopOutRatio) && candidates.stopOutRatio >= 0 && candidates.stopOutRatio <= candidates.maintenanceMarginRatio &&
+      Number.isInteger(candidates.rolloverHour) && candidates.rolloverHour >= 0 && candidates.rolloverHour <= 23 &&
+      Number.isInteger(candidates.rolloverMinute) && candidates.rolloverMinute >= 0 && candidates.rolloverMinute <= 59 &&
+      Number.isFinite(candidates.commPerShare) && candidates.commPerShare >= 0 &&
+      Number.isFinite(candidates.commVolumePct) && candidates.commVolumePct >= 0 && candidates.commVolumePct <= 1 &&
+      Number.isFinite(candidates.minCommOrder) && candidates.minCommOrder >= 0;
+    if (!valid) throw new Error('Saved broker assumptions are outside the supported range.');
+    Object.assign(TRADERNET_RULES, candidates);
+  } catch (error) {
+    logTerminal(`[Settings Error]: Could not load saved broker assumptions (${error.message}). Using defaults.`);
+  }
+}
+
+function setBrokerRuleInputs() {
+  document.getElementById('annualMarginRateInput').value = (TRADERNET_RULES.annualRate * 100).toFixed(2);
+  document.getElementById('interestDayCountInput').value = String(TRADERNET_RULES.dayCountBasis);
+  document.getElementById('maintenanceMarginInput').value = (TRADERNET_RULES.maintenanceMarginRatio * 100).toFixed(2);
+  document.getElementById('stopOutRatioInput').value = (TRADERNET_RULES.stopOutRatio * 100).toFixed(2);
+  document.getElementById('rolloverTimeInput').value =
+    `${String(TRADERNET_RULES.rolloverHour).padStart(2, '0')}:${String(TRADERNET_RULES.rolloverMinute).padStart(2, '0')}`;
+  document.getElementById('commissionPerShareInput').value = TRADERNET_RULES.commPerShare;
+  document.getElementById('commissionVolumeInput').value = (TRADERNET_RULES.commVolumePct * 100).toFixed(2);
+  document.getElementById('minimumCommissionInput').value = TRADERNET_RULES.minCommOrder.toFixed(2);
+  document.getElementById('stopOutRatioInput').setCustomValidity('');
+}
+
+function saveBrokerRuleInputs(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  document.getElementById('stopOutRatioInput').setCustomValidity('');
+  if (!form.reportValidity()) return;
+
+  const [rolloverHour, rolloverMinute] = document.getElementById('rolloverTimeInput').value.split(':').map(Number);
+  const previousRollover = `${TRADERNET_RULES.rolloverHour}:${TRADERNET_RULES.rolloverMinute}`;
+  const updatedRules = {
+    ...TRADERNET_RULES,
+    annualRate: Number(document.getElementById('annualMarginRateInput').value) / 100,
+    dayCountBasis: Number(document.getElementById('interestDayCountInput').value),
+    maintenanceMarginRatio: Number(document.getElementById('maintenanceMarginInput').value) / 100,
+    stopOutRatio: Number(document.getElementById('stopOutRatioInput').value) / 100,
+    rolloverHour,
+    rolloverMinute,
+    commPerShare: Number(document.getElementById('commissionPerShareInput').value),
+    commVolumePct: Number(document.getElementById('commissionVolumeInput').value) / 100,
+    minCommOrder: Number(document.getElementById('minimumCommissionInput').value)
+  };
+  if (updatedRules.stopOutRatio > updatedRules.maintenanceMarginRatio) {
+    document.getElementById('stopOutRatioInput').setCustomValidity('Stop-out equity must not exceed maintenance equity.');
+    document.getElementById('stopOutRatioInput').reportValidity();
+    return;
+  }
+  document.getElementById('stopOutRatioInput').setCustomValidity('');
+  Object.assign(TRADERNET_RULES, updatedRules);
+  localStorage.setItem(TRADERNET_RULES_STORAGE_KEY, JSON.stringify(updatedRules));
+  const nextRollover = `${TRADERNET_RULES.rolloverHour}:${TRADERNET_RULES.rolloverMinute}`;
+  if (previousRollover !== nextRollover) {
+    state.lastRolloverTimestamp = getLatestRolloverTimestamp();
+    saveState();
+  }
+  verifyTradernetRulesOnload();
+  renderBoard();
+  showToast('Broker assumptions saved in this browser.', 'success');
+}
+
+function resetBrokerRules() {
+  const previousRollover = `${TRADERNET_RULES.rolloverHour}:${TRADERNET_RULES.rolloverMinute}`;
+  Object.assign(TRADERNET_RULES, DEFAULT_TRADERNET_RULES);
+  localStorage.removeItem(TRADERNET_RULES_STORAGE_KEY);
+  setBrokerRuleInputs();
+  if (previousRollover !== `${TRADERNET_RULES.rolloverHour}:${TRADERNET_RULES.rolloverMinute}`) {
+    state.lastRolloverTimestamp = getLatestRolloverTimestamp();
+    saveState();
+  }
+  verifyTradernetRulesOnload();
+  renderBoard();
+  showToast('Broker assumptions restored to defaults.', 'info');
+}
+
+function getQuoteSymbolMapping(ticker) {
+  const symbol = ticker.trim().toUpperCase();
+  return state.quoteSymbols?.[symbol] || {};
+}
+
+function setQuoteSymbolMapping(ticker, mapping) {
+  const symbol = ticker.trim().toUpperCase();
+  if (!symbol) throw new Error('A portfolio ticker is required.');
+  if (!state.quoteSymbols || typeof state.quoteSymbols !== 'object') state.quoteSymbols = {};
+  const normalizedMapping = {
+    finnhub: (mapping.finnhub || '').trim(),
+    stooq: (mapping.stooq || '').trim()
+  };
+  if (!normalizedMapping.finnhub && !normalizedMapping.stooq) {
+    delete state.quoteSymbols[symbol];
+  } else {
+    state.quoteSymbols[symbol] = normalizedMapping;
+  }
+  const trackedItems = [
+    state.positions[symbol],
+    state.cashCushion?.holdings?.find(holding => holding.ticker === symbol)
+  ].filter(Boolean);
+  trackedItems.forEach(item => {
+    item.quoteSource = 'Symbol mapping changed; refresh quote';
+    delete item.quoteUpdatedAt;
+  });
+  saveState();
+  return normalizedMapping;
+}
+
+function populateQuoteSymbolMapping(ticker) {
+  const symbol = ticker.trim().toUpperCase();
+  const mapping = getQuoteSymbolMapping(symbol);
+  document.getElementById('finnhubSymbolInput').value = mapping.finnhub || '';
+  document.getElementById('stooqSymbolInput').value = mapping.stooq || '';
+  document.getElementById('quoteMappingStatus').textContent = symbol
+    ? `Mapping for ${symbol}. Blank provider symbol uses its default US ticker format.`
+    : 'Blank provider symbol uses its default US ticker format.';
+}
+
+function saveQuoteSymbolMapping(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  if (!form.reportValidity()) return;
+
+  const ticker = document.getElementById('quoteMappingTickerInput').value.trim().toUpperCase();
+  if (!ticker) return;
+
+  const mapping = setQuoteSymbolMapping(ticker, {
+    finnhub: document.getElementById('finnhubSymbolInput').value.trim(),
+    stooq: document.getElementById('stooqSymbolInput').value.trim()
+  });
+  document.getElementById('quoteMappingStatus').textContent =
+    mapping.finnhub || mapping.stooq
+      ? `Saved ${ticker}: Finnhub ${mapping.finnhub || '(default)'}, Stooq ${mapping.stooq || '(default)'}. Refresh quotes to apply.`
+      : `${ticker} uses default provider symbols. Refresh quotes to apply.`;
+  showToast(`Quote symbols updated for ${ticker}.`, 'success');
+}
+
 function verifyTradernetRulesOnload() {
   const ratePct = (TRADERNET_RULES.annualRate * 100).toFixed(2);
-  const dailyPct = (TRADERNET_RULES.dailyRate * 100).toFixed(4);
+  const dailyPct = (getDailyRate() * 100).toFixed(4);
+  const maintenancePct = (TRADERNET_RULES.maintenanceMarginRatio * 100).toFixed(2);
+  const rolloverTime = `${String(TRADERNET_RULES.rolloverHour).padStart(2, '0')}:${String(TRADERNET_RULES.rolloverMinute).padStart(2, '0')}`;
   document.getElementById('rulesSummary').innerText = 
-    `Tradernet AR Rules: ${ratePct}% p.a. (${dailyPct}%/d) | 4:00 AM AMT (UTC+4) Compounding | D_min 10%`;
+    `Broker model: ${ratePct}% p.a. (${dailyPct}%/d, /${TRADERNET_RULES.dayCountBasis}) | ${rolloverTime} Armenia time compounding | Maintenance equity ${maintenancePct}%`;
+  updateRiskAssumptionTitles();
+}
+
+function updateRiskAssumptionTitles() {
+  document.getElementById('boardStopOutRow').title =
+    `Estimate assumes the configured ${(TRADERNET_RULES.stopOutRatio * 100).toFixed(2)}% stop-out equity threshold and that the full allocated cushion qualifies as collateral. Actual broker requirements may differ.`;
+  document.getElementById('boardMarginRisk').parentElement.title =
+    `Estimated from portfolio equity and configured thresholds: ${(TRADERNET_RULES.maintenanceMarginRatio * 100).toFixed(2)}% maintenance equity and ${(TRADERNET_RULES.stopOutRatio * 100).toFixed(2)}% stop-out equity. Not a live broker risk indicator.`;
+}
+
+function getZonedDateParts(date, timeZone = TRADERNET_RULES.rolloverTimeZone) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(date);
+  return Object.fromEntries(parts.filter(part => part.type !== 'literal').map(part => [part.type, Number(part.value)]));
+}
+
+function zonedLocalTimeToTimestamp(year, month, day, hour, minute, timeZone = TRADERNET_RULES.rolloverTimeZone) {
+  const targetUtc = Date.UTC(year, month - 1, day, hour, minute);
+  let timestamp = targetUtc;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const parts = getZonedDateParts(new Date(timestamp), timeZone);
+    const representedUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+    const adjustment = targetUtc - representedUtc;
+    if (adjustment === 0) return timestamp;
+    timestamp += adjustment;
+  }
+  return timestamp;
+}
+
+function shiftCalendarDate(year, month, day, offset) {
+  const shifted = new Date(Date.UTC(year, month - 1, day + offset));
+  return { year: shifted.getUTCFullYear(), month: shifted.getUTCMonth() + 1, day: shifted.getUTCDate() };
+}
+
+function getRolloverTimestampForLocalDate(year, month, day) {
+  return zonedLocalTimeToTimestamp(
+    year, month, day, TRADERNET_RULES.rolloverHour, TRADERNET_RULES.rolloverMinute
+  );
+}
+
+function getLatestRolloverTimestamp(now = new Date()) {
+  const local = getZonedDateParts(now);
+  let rollover = getRolloverTimestampForLocalDate(local.year, local.month, local.day);
+  if (rollover > now.getTime()) {
+    const previousDate = shiftCalendarDate(local.year, local.month, local.day, -1);
+    rollover = getRolloverTimestampForLocalDate(previousDate.year, previousDate.month, previousDate.day);
+  }
+  return rollover;
 }
 
 function applyOvernightRollover() {
   const now = new Date();
-  if (!state.lastRolloverTimestamp) {
-    const today4am = new Date(now.getFullYear(), now.getMonth(), now.getDate(), TRADERNET_RULES.rolloverHour, 0, 0);
-    state.lastRolloverTimestamp = (now >= today4am) 
-      ? today4am.getTime() 
-      : today4am.getTime() - (24 * 3600 * 1000);
+  if (!Number.isFinite(Number(state.lastRolloverTimestamp)) || Number(state.lastRolloverTimestamp) <= 0) {
+    state.lastRolloverTimestamp = getLatestRolloverTimestamp(now);
     saveState();
     return;
   }
 
-  let cursor = new Date(state.lastRolloverTimestamp);
   let elapsedCycles = 0;
-
-  while (true) {
-    cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1, TRADERNET_RULES.rolloverHour, 0, 0);
-    if (cursor.getTime() <= now.getTime()) {
-      elapsedCycles++;
-    } else {
-      break;
-    }
+  const lastRolloverTimestamp = Number(state.lastRolloverTimestamp);
+  const last = getZonedDateParts(new Date(lastRolloverTimestamp));
+  let rolloverDate = { year: last.year, month: last.month, day: last.day };
+  let cursor = getRolloverTimestampForLocalDate(rolloverDate.year, rolloverDate.month, rolloverDate.day);
+  if (cursor <= lastRolloverTimestamp) {
+    rolloverDate = shiftCalendarDate(rolloverDate.year, rolloverDate.month, rolloverDate.day, 1);
+    cursor = getRolloverTimestampForLocalDate(rolloverDate.year, rolloverDate.month, rolloverDate.day);
+  }
+  while (cursor <= now.getTime()) {
+    elapsedCycles++;
+    rolloverDate = shiftCalendarDate(rolloverDate.year, rolloverDate.month, rolloverDate.day, 1);
+    cursor = getRolloverTimestampForLocalDate(rolloverDate.year, rolloverDate.month, rolloverDate.day);
   }
 
   if (elapsedCycles > 0 && Math.abs(state.marginBalance) > 0) {
     const currentDebt = Math.abs(state.marginBalance);
-    const compoundedDebt = currentDebt * Math.pow(1 + DAILY_RATE, elapsedCycles);
+    const compoundedDebt = currentDebt * Math.pow(1 + getDailyRate(), elapsedCycles);
     const interestAccrued = compoundedDebt - currentDebt;
 
     state.marginBalance = -compoundedDebt;
@@ -367,7 +608,7 @@ function applyOvernightRollover() {
 
     state.lastRolloverTimestamp = now.getTime();
     saveState();
-    logTerminal(`[Tradernet 4:00 AM Rollover]: Processed ${elapsedCycles} cycle(s). Accrued interest: +$${formatUSD(interestAccrued)}. Margin Debt: -$${formatUSD(compoundedDebt)}.`);
+    logTerminal(`[Broker ${String(TRADERNET_RULES.rolloverHour).padStart(2, '0')}:${String(TRADERNET_RULES.rolloverMinute).padStart(2, '0')} Armenia rollover]: Processed ${elapsedCycles} cycle(s). Accrued interest: +$${formatUSD(interestAccrued)}. Margin Debt: -$${formatUSD(compoundedDebt)}.`);
   } else if (elapsedCycles > 0) {
     state.lastRolloverTimestamp = now.getTime();
     saveState();
@@ -434,7 +675,12 @@ function updateCombinedBreakeven() {
     return;
   }
 
-  const t_be = Math.log(1 + (netTargetProfit / totalDebt)) / Math.log(1 + DAILY_RATE);
+  if (getDailyRate() === 0) {
+    beEl.innerText = "Combined Breakeven: 0 days (no ongoing margin interest)";
+    return;
+  }
+
+  const t_be = Math.log(1 + (netTargetProfit / totalDebt)) / Math.log(1 + getDailyRate());
   const beDays = Math.ceil(t_be);
 
   const beDate = new Date();
@@ -560,20 +806,42 @@ function renderCashCushionPanel() {
     const price = Number(h.price) || 0;
     const val = shares * price;
     const allocation = stocksTotal > 0 ? (val / stocksTotal) * 100 : 0;
+    const quoteMeta = formatQuoteMetadata(h);
 
     const tr = document.createElement('tr');
     tr.className = "hover:bg-slate-900/40";
-    tr.innerHTML = `
-      <td class="py-2 px-3 text-cyan-300 font-bold">${h.ticker}</td>
-      <td class="py-2 px-3 text-right text-slate-200 tabular-nums">${shares.toLocaleString('en-US', { maximumFractionDigits: 3 })}</td>
-      <td class="py-2 px-3 text-right text-emerald-400 font-semibold tabular-nums">$${formatUSD(price)}</td>
-      <td class="py-2 px-3 text-right text-white font-semibold">$${formatUSD(val)}</td>
-      <td class="py-2 px-3 text-right text-slate-300 tabular-nums">${allocation.toFixed(1)}%</td>
-      <td class="py-2 px-3 text-center space-x-2">
-        <button onclick="fetchLivePrice('${h.ticker}')" class="text-cyan-400 hover:text-cyan-300 text-xs font-bold" title="Refresh Live Price">↻</button>
-        <button onclick="removeCashStock(${idx})" class="text-rose-400 hover:text-rose-300 text-xs font-bold">Remove</button>
-      </td>
-    `;
+    const addCell = (content, className) => {
+      const cell = document.createElement('td');
+      cell.className = className;
+      cell.textContent = content;
+      tr.appendChild(cell);
+      return cell;
+    };
+    addCell(h.ticker, 'py-2 px-3 text-cyan-300 font-bold');
+    addCell(shares.toLocaleString('en-US', { maximumFractionDigits: 3 }), 'py-2 px-3 text-right text-slate-200 tabular-nums');
+    const priceCell = document.createElement('td');
+    priceCell.className = 'py-2 px-3 text-right text-emerald-400 font-semibold tabular-nums';
+    const priceLabel = document.createElement('span');
+    priceLabel.textContent = `$${formatUSD(price)}`;
+    const quoteLabel = document.createElement('span');
+    quoteLabel.className = 'mt-0.5 block text-[9px] font-normal text-slate-500';
+    quoteLabel.textContent = quoteMeta;
+    priceCell.append(priceLabel, quoteLabel);
+    tr.appendChild(priceCell);
+    addCell(`$${formatUSD(val)}`, 'py-2 px-3 text-right text-white font-semibold');
+    addCell(`${allocation.toFixed(1)}%`, 'py-2 px-3 text-right text-slate-300 tabular-nums');
+    const actionsCell = addCell('', 'py-2 px-3 text-center space-x-2');
+    const refreshButton = document.createElement('button');
+    refreshButton.className = 'text-cyan-400 hover:text-cyan-300 text-xs font-bold';
+    refreshButton.title = 'Refresh Live Price';
+    refreshButton.setAttribute('aria-label', `Refresh ${h.ticker} quote`);
+    refreshButton.textContent = '↻';
+    refreshButton.addEventListener('click', () => fetchLivePrice(h.ticker));
+    const removeButton = document.createElement('button');
+    removeButton.className = 'text-rose-400 hover:text-rose-300 text-xs font-bold';
+    removeButton.textContent = 'Remove';
+    removeButton.addEventListener('click', () => removeCashStock(idx));
+    actionsCell.append(refreshButton, removeButton);
     tableBody.appendChild(tr);
   });
 
@@ -593,6 +861,74 @@ function renderCashCushionPanel() {
 
   const totalCushion = freeCash + stocksTotal;
   document.getElementById('cushionTotalValue').innerText = `$${formatUSD(totalCushion)}`;
+}
+
+function formatQuoteMetadata(holding) {
+  if (!holding.quoteUpdatedAt) return holding.quoteSource || 'Not fetched';
+
+  const updatedAt = Number(holding.quoteUpdatedAt);
+  if (!Number.isFinite(updatedAt)) return holding.quoteSource || 'Not fetched';
+  const time = new Date(updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const refreshInterval = Number(localStorage.getItem(QUOTE_REFRESH_INTERVAL_KEY)) || DEFAULT_QUOTE_REFRESH_INTERVAL_MS;
+  const isStale = Date.now() - updatedAt > Math.max(5 * 60 * 1000, refreshInterval * 2);
+  return `${isStale ? 'Stale · ' : ''}${holding.quoteSource || 'Quote'} · ${time}`;
+}
+
+function recordTrackedPrice(ticker, price, sourceName, updatedAt = null) {
+  const symbol = ticker.toUpperCase();
+  let matched = false;
+  const updateQuoteMetadata = holding => {
+    holding.quoteSource = sourceName;
+    if (updatedAt === null) delete holding.quoteUpdatedAt;
+    else holding.quoteUpdatedAt = updatedAt;
+  };
+
+  if (state.positions[symbol]) {
+    state.positions[symbol].currentPrice = price;
+    updateQuoteMetadata(state.positions[symbol]);
+    matched = true;
+  }
+  const cashHolding = state.cashCushion?.holdings?.find(holding => holding.ticker === symbol);
+  if (cashHolding) {
+    cashHolding.price = price;
+    updateQuoteMetadata(cashHolding);
+    matched = true;
+  }
+  return matched;
+}
+
+function addCashHolding(ticker, shares, givenPrice = 0) {
+  const symbol = ticker.trim().toUpperCase();
+  const quantity = Number(shares);
+  const manualPrice = Number(givenPrice);
+  if (!symbol || !Number.isFinite(quantity) || quantity <= 0) {
+    throw new Error('Ticker and a positive share quantity are required.');
+  }
+
+  if (!state.cashCushion) state.cashCushion = { freeCash: 0, holdings: [] };
+  if (!Array.isArray(state.cashCushion.holdings)) state.cashCushion.holdings = [];
+  const existing = state.cashCushion.holdings.find(holding => holding.ticker === symbol);
+  const currentPrice = Number.isFinite(manualPrice) && manualPrice > 0
+    ? manualPrice
+    : (Number(existing?.price) || 0);
+
+  if (existing) {
+    existing.shares = (Number(existing.shares) || 0) + quantity;
+  } else {
+    state.cashCushion.holdings.push({ ticker: symbol, shares: quantity, price: currentPrice });
+  }
+  if (Number.isFinite(manualPrice) && manualPrice > 0) {
+    recordTrackedPrice(symbol, manualPrice, 'Manual');
+  }
+  return { ticker: symbol, shares: quantity, price: currentPrice };
+}
+
+function removeCashHolding(ticker) {
+  const holdings = state.cashCushion?.holdings;
+  if (!Array.isArray(holdings)) return null;
+  const symbol = ticker.trim().toUpperCase();
+  const index = holdings.findIndex(holding => holding.ticker === symbol);
+  return index < 0 ? null : holdings.splice(index, 1)[0];
 }
 
 function setCurrentBalance(value) {
@@ -635,17 +971,7 @@ async function addCashStockFromUI() {
     return;
   }
 
-  if (!state.cashCushion.holdings) state.cashCushion.holdings = [];
-  const existing = state.cashCushion.holdings.find(h => h.ticker === ticker);
-  
-  const priceToUse = (!isNaN(manualPrice) && manualPrice > 0) ? manualPrice : (existing ? existing.price : 0);
-
-  if (existing) {
-    existing.shares += shares;
-    if (priceToUse > 0) existing.price = priceToUse;
-  } else {
-    state.cashCushion.holdings.push({ ticker, shares, price: priceToUse });
-  }
+  addCashHolding(ticker, shares, manualPrice);
 
   tickerInput.value = '';
   sharesInput.value = '';
@@ -659,14 +985,13 @@ async function addCashStockFromUI() {
 }
 
 function removeCashStock(index) {
-  if (!state.cashCushion.holdings) return;
-  const removed = state.cashCushion.holdings.splice(index, 1);
+  const holding = state.cashCushion?.holdings?.[index];
+  if (!holding) return;
+  const removed = removeCashHolding(holding.ticker);
   saveState();
   renderBoard();
-  if (removed.length > 0) {
-    logTerminal(`[Cash Cushion]: Removed ${removed[0].ticker} from cash holdings.`);
-    showToast(`${removed[0].ticker} removed from cash holdings.`, 'info');
-  }
+  logTerminal(`[Cash Cushion]: Removed ${removed.ticker} from cash holdings.`);
+  showToast(`${removed.ticker} removed from cash holdings.`, 'info');
 }
 
 function renderCombinedView(tickers) {
@@ -696,7 +1021,7 @@ function renderCombinedView(tickers) {
   const unrealizedPct = totalInvested > 0 ? (totalUnrealized / totalInvested) * 100 : 0;
 
   const totalDebt = Math.abs(state.marginBalance);
-  const dailyAccrual = totalDebt * DAILY_RATE;
+  const dailyAccrual = totalDebt * getDailyRate();
 
   document.getElementById('boardTitle').innerText = tickers.length > 0
     ? `COMBINED PORTFOLIO (${tickers.length} Positions | ${netPct >= 0 ? '+' : ''}${netPct.toFixed(2)}% Net Combined Target)`
@@ -711,13 +1036,18 @@ function renderCombinedView(tickers) {
   const unSign = totalUnrealized >= 0 ? '+' : '';
   document.getElementById('boardPrice').innerHTML = `$${formatUSD(totalMarketValue)} – <span class="${totalUnrealized >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${unSign}$${formatUSD(totalUnrealized)} (${unSign}${unrealizedPct.toFixed(2)}%)</span>`;
   
-  document.getElementById('boardMargin').innerText = `-$${formatUSD(totalDebt)} ($${formatUSD(dailyAccrual)}/day @ ${(TRADERNET_RULES.dailyRate*100).toFixed(4)}%)`;
+  document.getElementById('boardMargin').innerText = `-$${formatUSD(totalDebt)} ($${formatUSD(dailyAccrual)}/day @ ${(getDailyRate()*100).toFixed(4)}%)`;
   document.getElementById('boardComms').innerText = `$${formatUSD(totalComms)} ($${formatUSD(totalCommBuy)} buy / $${formatUSD(totalCommSell)} sell)`;
   document.getElementById('boardMarginCharged').innerText = `$${formatUSD(totalMarginCharged)}`;
 
   const cushionTotal = getCashCushionTotal();
   document.getElementById('boardCushionLabel').innerText = 'Cash / Collateral Cushion:';
   document.getElementById('boardCushionMetric').innerText = `+$${formatUSD(cushionTotal)}`;
+  const quotes = tickers.map(ticker => state.positions[ticker]).filter(position => position.quoteUpdatedAt);
+  const latestQuote = quotes.sort((a, b) => b.quoteUpdatedAt - a.quoteUpdatedAt)[0];
+  document.getElementById('boardQuoteMeta').innerText = latestQuote
+    ? `Latest portfolio quote · ${formatQuoteMetadata(latestQuote)}`
+    : 'No live quotes fetched for margin positions';
 
   const totalAccountEquity = (totalMarketValue + cushionTotal) - totalDebt;
   const totalAccountAssets = totalMarketValue + cushionTotal;
@@ -745,7 +1075,7 @@ function renderSingleAssetView(pos) {
   const allocatedDebt = totalAccountDebt * weight;
   const totalCushion = getCashCushionTotal();
   const allocatedCushion = totalCushion * weight;
-  const allocatedDailyAccrual = allocatedDebt * DAILY_RATE;
+  const allocatedDailyAccrual = allocatedDebt * getDailyRate();
   const posMarginCharged = pos.marginCharged || 0.00;
 
   const net0 = gross - totalComms - posMarginCharged;
@@ -774,6 +1104,7 @@ function renderSingleAssetView(pos) {
 
   document.getElementById('boardCushionLabel').innerText = 'Allocated Cash / Collateral:';
   document.getElementById('boardCushionMetric').innerText = `+$${formatUSD(allocatedCushion)}`;
+  document.getElementById('boardQuoteMeta').innerText = formatQuoteMetadata(pos);
 
   const positionAssets = currentMktVal + allocatedCushion;
   const positionEquity = positionAssets - allocatedDebt;
@@ -802,10 +1133,11 @@ function renderMarginRisk(debt, positionValue, collateral) {
   const equity = assets - debt;
   const equityRatio = assets > 0 ? (equity / assets) * 100 : -Infinity;
   const maintenanceRatio = TRADERNET_RULES.maintenanceMarginRatio * 100;
+  const stopOutRatio = TRADERNET_RULES.stopOutRatio * 100;
   let riskLevel;
   let riskClass;
 
-  if (equity <= 0) {
+  if (equityRatio <= stopOutRatio) {
     riskLevel = 'Stop-out level';
     riskClass = 'text-rose-400';
   } else if (equityRatio <= maintenanceRatio) {
@@ -818,17 +1150,18 @@ function renderMarginRisk(debt, positionValue, collateral) {
     riskLevel = 'Healthy';
     riskClass = 'text-emerald-400';
   }
-  riskSummary.innerText = `${riskLevel} · ${Number.isFinite(equityRatio) ? `${equityRatio.toFixed(1)}% equity` : 'negative equity'} (10% required)`;
+  riskSummary.innerText = `${riskLevel} · ${Number.isFinite(equityRatio) ? `${equityRatio.toFixed(1)}% equity` : 'negative equity'} (${maintenanceRatio.toFixed(1)}% maintenance)`;
   riskSummary.className = `${riskClass} font-bold font-mono`;
 
   const marginCallAssetsRequired = debt / (1 - TRADERNET_RULES.maintenanceMarginRatio);
+  const stopOutAssetsRequired = debt / (1 - TRADERNET_RULES.stopOutRatio);
   marginCallRow.classList.toggle('hidden', collateral >= marginCallAssetsRequired);
-  stopOutRow.classList.toggle('hidden', collateral >= debt);
+  stopOutRow.classList.toggle('hidden', collateral >= stopOutAssetsRequired);
   const marginCallValue = Math.max(0, marginCallAssetsRequired - collateral);
-  const stopOutValue = Math.max(0, debt - collateral);
+  const stopOutValue = Math.max(0, stopOutAssetsRequired - collateral);
 
   if (marginCallValue > 0) document.getElementById('boardMarginCall').innerText = formatRiskTrigger(marginCallValue, positionValue);
-  if (collateral < debt) document.getElementById('boardStopOut').innerText = formatRiskTrigger(stopOutValue, positionValue);
+  if (collateral < stopOutAssetsRequired) document.getElementById('boardStopOut').innerText = formatRiskTrigger(stopOutValue, positionValue);
 }
 
 function formatRiskTrigger(triggerValue, currentValue) {
@@ -856,12 +1189,12 @@ function renderProjectionTable(gross, totalComms, debtToUse, marginChargedToUse,
       const dateFormatted = `${d.toLocaleDateString('en-US', { month: 'short' })} ${d.getDate()}`;
       const label = days === 0 ? `${dateFormatted} (Today)` : `${dateFormatted} (+${days}d)`;
 
-      const b_t = debtToUse * Math.pow(1 + DAILY_RATE, days);
+      const b_t = debtToUse * Math.pow(1 + getDailyRate(), days);
       const additionalAccrual = b_t - debtToUse;
       const m_d = marginChargedToUse + additionalAccrual;
       const fee_c = totalComms + m_d;
       const net_p = gross - fee_c;
-      const dr = b_t * DAILY_RATE;
+      const dr = b_t * getDailyRate();
 
       const tr = document.createElement('tr');
       tr.className = days === 0 ? "bg-slate-900/80 font-bold" : "hover:bg-slate-900/40";
@@ -935,7 +1268,12 @@ async function requestLivePrice(symbol) {
   const existingRequest = livePriceRequests.get(symbol);
   if (existingRequest) return existingRequest;
 
-  const request = fetchLivePriceFromProviders(symbol);
+  const request = fetchLivePriceFromProviders(symbol).then(result => ({
+    ...result,
+    matched: result.price !== null
+      ? recordTrackedPrice(symbol, result.price, result.sourceName, result.updatedAt)
+      : false
+  }));
   livePriceRequests.set(symbol, request);
   try {
     return await request;
@@ -945,20 +1283,24 @@ async function requestLivePrice(symbol) {
 }
 
 async function fetchLivePriceFromProviders(symbol) {
+  symbol = symbol.toUpperCase();
   let price = null;
   let sourceName = "";
   const providerErrors = [];
+  const configuredSymbols = state.quoteSymbols?.[symbol] || {};
+  const finnhubSymbol = configuredSymbols.finnhub || symbol;
+  const stooqSymbol = configuredSymbols.stooq || `${symbol.toLowerCase()}.us`;
 
   const finnhubKey = localStorage.getItem('finnhub_api_key');
 
   if (finnhubKey) {
     try {
-      const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${finnhubKey}`);
+      const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(finnhubSymbol)}&token=${encodeURIComponent(finnhubKey)}`);
       if (res.ok) {
         const data = await res.json();
         if (data && data.c && Number(data.c) > 0) {
           price = Number(data.c);
-          sourceName = "Finnhub Live";
+          sourceName = `Finnhub Live · ${finnhubSymbol}`;
         } else {
           providerErrors.push("Finnhub returned no valid quote");
         }
@@ -972,7 +1314,7 @@ async function fetchLivePriceFromProviders(symbol) {
 
   if (!price) {
     try {
-      const stooqUrl = `https://stooq.com/q/l/?s=${symbol.toLowerCase()}.us&f=sd2t2ohlcv&h&e=csv`;
+      const stooqUrl = `https://stooq.com/q/l/?s=${encodeURIComponent(stooqSymbol.toLowerCase())}&f=sd2t2ohlcv&h&e=csv`;
       const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(stooqUrl)}`;
       
       const res = await fetch(proxyUrl);
@@ -985,7 +1327,7 @@ async function fetchLivePriceFromProviders(symbol) {
             const val = parseFloat(cols[6]);
             if (!isNaN(val) && val > 0) {
               price = val;
-              sourceName = "Stooq Feed";
+              sourceName = `Stooq Feed · ${stooqSymbol}`;
             } else {
               providerErrors.push("Stooq returned no valid quote");
             }
@@ -1003,21 +1345,12 @@ async function fetchLivePriceFromProviders(symbol) {
     }
   }
 
-  if (price) {
-    if (state.positions[symbol]) {
-      state.positions[symbol].currentPrice = price;
-    }
-    if (state.cashCushion && state.cashCushion.holdings) {
-      const cashHolding = state.cashCushion.holdings.find(h => h.ticker === symbol);
-      if (cashHolding) {
-        cashHolding.price = price;
-      }
-    }
-  }
+  const updatedAt = price ? Date.now() : null;
 
   return {
     price,
     sourceName,
+    updatedAt,
     error: price ? null : (providerErrors.length ? providerErrors.join("; ") : "No quote provider is configured")
   };
 }
@@ -1027,14 +1360,10 @@ async function fetchLivePrice(ticker, silent = false) {
   const result = await requestLivePrice(symbol);
 
   if (result.price !== null) {
-    const matched = Boolean(
-      state.positions[symbol] ||
-      state.cashCushion?.holdings?.some(holding => holding.ticker === symbol)
-    );
     saveState();
     renderBoard();
     if (!silent) {
-      logTerminal(`[${result.sourceName}]: ${symbol} updated to $${formatUSD(result.price)}${matched ? '' : ' (quote only)'}.`);
+      logTerminal(`[${result.sourceName}]: ${symbol} updated to $${formatUSD(result.price)}${result.matched ? '' : ' (quote only)'}.`);
     }
     return result.price;
   }
@@ -1114,9 +1443,7 @@ async function importBackupJSON(event) {
     try {
       const importedState = JSON.parse(e.target.result);
       if (importedState && typeof importedState === 'object') {
-        state = importedState;
-        if (!state.cashCushion) state.cashCushion = { freeCash: 0.00, holdings: [] };
-        if (!state.positions) state.positions = {};
+        state = normalizePortfolioState(importedState);
         
         localStorage.setItem('margin_portfolio_state_dynamic_v2', JSON.stringify(state));
         await pushStateToGist(true);
@@ -1156,7 +1483,7 @@ function runLadderSimulation(data) {
   data.steps.forEach((step, idx) => {
     const stepDays = Math.max(0, step.days - currentDay);
     if (stepDays > 0 && runningDebt > 0) {
-      const compounded = runningDebt * Math.pow(1 + DAILY_RATE, stepDays);
+      const compounded = runningDebt * Math.pow(1 + getDailyRate(), stepDays);
       totalAccruedMargin += (compounded - runningDebt);
       runningDebt = compounded;
     }
@@ -1224,7 +1551,7 @@ function runComparison(data) {
     const commSell = calcCommission(pos.shares, grossProceeds);
     const totalComms = pos.commBuy + commSell;
     
-    const b_t = debtToUse * Math.pow(1 + DAILY_RATE, s.days);
+    const b_t = debtToUse * Math.pow(1 + getDailyRate(), s.days);
     const additionalMargin = b_t - debtToUse;
     const totalMargin = marginChargedToUse + additionalMargin;
 
@@ -1313,7 +1640,7 @@ function runSimulation(simPrice, daysOffset, label, tickerTarget) {
   const weight = portfolioInvested > 0 ? (totalInvested / portfolioInvested) : 1;
   const debtToUse = Math.abs(state.marginBalance) * weight;
 
-  const b_t = debtToUse * Math.pow(1 + DAILY_RATE, daysOffset);
+  const b_t = debtToUse * Math.pow(1 + getDailyRate(), daysOffset);
   const additionalMargin = b_t - debtToUse;
   const totalMarginAtDate = (pos.marginCharged || 0.00) + additionalMargin;
 
@@ -1363,6 +1690,7 @@ async function applyPortfolioActions(action) {
         shares: 0,
         tranches: [],
         currentPrice: price,
+        quoteSource: 'Trade input',
         pt: action.pt ? Number(action.pt) : Number((price * 1.05).toFixed(2)),
         commBuy: 0,
         marginCharged: 0.00,
@@ -1379,6 +1707,8 @@ async function applyPortfolioActions(action) {
     });
     pos.commBuy += buyComm;
     pos.currentPrice = price;
+    pos.quoteSource = 'Trade input';
+    delete pos.quoteUpdatedAt;
     if (action.pt) pos.pt = Number(action.pt);
 
     // 1. Consume Free Cash first
@@ -1488,18 +1818,7 @@ async function applyPortfolioActions(action) {
       return;
     }
 
-    let updated = false;
-    if (state.positions[ticker]) {
-      state.positions[ticker].currentPrice = newP;
-      updated = true;
-    }
-    if (state.cashCushion && state.cashCushion.holdings) {
-      const ch = state.cashCushion.holdings.find(h => h.ticker === ticker);
-      if (ch) {
-        ch.price = newP;
-        updated = true;
-      }
-    }
+    const updated = recordTrackedPrice(ticker, newP, 'Manual');
     if (updated) {
       saveState();
       logTerminal(`[Price Updated]: ${ticker} market price set to $${formatUSD(newP)}.`);
@@ -1520,17 +1839,7 @@ async function applyPortfolioActions(action) {
     const shares = Number(action.shares);
     const givenPrice = Number(action.price) || 0;
 
-    if (!state.cashCushion.holdings) state.cashCushion.holdings = [];
-    const existing = state.cashCushion.holdings.find(h => h.ticker === ticker);
-    
-    const priceToUse = givenPrice > 0 ? givenPrice : (existing ? existing.price : 0);
-
-    if (existing) {
-      existing.shares += shares;
-      if (priceToUse > 0) existing.price = priceToUse;
-    } else {
-      state.cashCushion.holdings.push({ ticker, shares, price: priceToUse });
-    }
+    addCashHolding(ticker, shares, givenPrice);
     saveState();
     logTerminal(`[Balance]: Added ${shares} ${ticker} to balance holdings. Syncing online quote...`);
     renderBoard();
@@ -1539,10 +1848,10 @@ async function applyPortfolioActions(action) {
   }
   else if (action.action === "remove_cash_stock") {
     const ticker = action.ticker.toUpperCase();
-    if (state.cashCushion && state.cashCushion.holdings) {
-      state.cashCushion.holdings = state.cashCushion.holdings.filter(h => h.ticker !== ticker);
+    const removed = removeCashHolding(ticker);
+    if (removed) {
       saveState();
-      logTerminal(`[Balance]: Removed ${ticker} from balance holdings.`);
+      logTerminal(`[Balance]: Removed ${removed.ticker} from balance holdings.`);
     }
   }
 
@@ -1559,6 +1868,28 @@ async function executeCommand() {
 
   if (/^(?:pull|sync cloud|cloud pull|pull cloud|load cloud)$/i.test(text)) {
     await pullCloudAndRewriteLocal();
+    return;
+  }
+
+  const quoteSymbolCommand = text.match(/^quote\s+symbol(?:\s+(.*))?$/i);
+  if (quoteSymbolCommand) {
+    const [tickerInput, ...assignments] = (quoteSymbolCommand[1] || '').trim().split(/\s+/);
+    if (!tickerInput || !/^[A-Za-z0-9._:-]+$/.test(tickerInput) || assignments.length === 0) {
+      logTerminal('[Command Error]: Use quote symbol TICKER finnhub=SYMBOL stooq=SYMBOL (use default to clear a provider mapping).');
+      return;
+    }
+    const mapping = { ...getQuoteSymbolMapping(tickerInput) };
+    for (const assignment of assignments) {
+      const match = assignment.match(/^(finnhub|stooq)=(.+)$/i);
+      if (!match) {
+        logTerminal('[Command Error]: Use quote symbol TICKER finnhub=SYMBOL stooq=SYMBOL (use default to clear a provider mapping).');
+        return;
+      }
+      mapping[match[1].toLowerCase()] = match[2].toLowerCase() === 'default' ? '' : match[2];
+    }
+    const ticker = tickerInput.toUpperCase();
+    const updatedMapping = setQuoteSymbolMapping(ticker, mapping);
+    logTerminal(`[Quote Mapping]: ${ticker} — Finnhub: ${updatedMapping.finnhub || 'default'} | Stooq: ${updatedMapping.stooq || 'default'}. Refresh ${ticker} or click Quotes to apply.`);
     return;
   }
 
@@ -1802,6 +2133,13 @@ window.onload = async () => {
   quoteRefreshInterval.value = String(initialQuoteRefreshInterval);
   quoteRefreshInterval.addEventListener('change', () => setQuoteRefreshInterval(quoteRefreshInterval.value));
   setQuoteRefreshInterval(initialQuoteRefreshInterval);
+  setBrokerRuleInputs();
+  document.getElementById('brokerRulesForm').addEventListener('submit', saveBrokerRuleInputs);
+  document.getElementById('resetBrokerRulesButton').addEventListener('click', resetBrokerRules);
+  document.getElementById('quoteSymbolForm').addEventListener('submit', saveQuoteSymbolMapping);
+  document.getElementById('quoteMappingTickerInput').addEventListener('change', event => {
+    populateQuoteSymbolMapping(event.target.value);
+  });
   updateHeaderCredentialsVisibility();
   await refreshAllLivePrices();
 };

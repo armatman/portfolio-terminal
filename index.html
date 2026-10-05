@@ -20,7 +20,7 @@
           <div class="flex items-center gap-2 flex-wrap">
             <h1 class="text-xl font-bold text-emerald-400 tracking-wider">MARGIN DESK TERMINAL</h1>
             <span class="bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-black px-2 py-0.5 rounded tracking-wide">
-              TRADERNET AR COMPLIANT
+              BROKER MODEL
             </span>
             <span id="cloudStatusBadge" class="bg-slate-900 text-slate-400 border border-slate-700 text-[10px] font-black px-2 py-0.5 rounded tracking-wide flex items-center gap-1">
               <span class="w-1.5 h-1.5 rounded-full bg-slate-500" id="cloudStatusDot"></span>
@@ -28,12 +28,74 @@
             </span>
           </div>
           <p class="text-xs text-slate-400 mt-0.5" id="rulesSummary">
-            Tradernet AR Rules: 15.00% p.a. (0.0411%/d) | 4:00 AM AMT (UTC+4) Compounding | D_min 10%
+            Configurable broker model assumptions; verify current terms with your broker.
           </p>
         </div>
       </div>
 
       <div class="space-y-3">
+        <details class="rounded border border-slate-800 bg-slate-950/40 p-3">
+          <summary class="cursor-pointer text-xs font-bold text-slate-300 hover:text-cyan-300">Broker assumptions &amp; quote symbols</summary>
+          <div class="mt-3 grid gap-4 lg:grid-cols-2">
+            <form id="brokerRulesForm" class="space-y-2">
+              <p class="text-[10px] uppercase tracking-wider text-slate-500">Margin and commission assumptions (USD)</p>
+              <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                <label class="flex flex-col gap-1 text-[10px] text-slate-400">Annual margin rate (%)
+                  <input id="annualMarginRateInput" type="number" min="0" max="100" step="0.01" required inputmode="decimal" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                </label>
+                <label class="flex flex-col gap-1 text-[10px] text-slate-400">Interest day-count basis
+                  <select id="interestDayCountInput" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                    <option value="365">365 days</option>
+                    <option value="360">360 days</option>
+                  </select>
+                </label>
+                <label class="flex flex-col gap-1 text-[10px] text-slate-400">Maintenance equity (%)
+                  <input id="maintenanceMarginInput" type="number" min="0" max="99.99" step="0.01" required inputmode="decimal" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                </label>
+                <label class="flex flex-col gap-1 text-[10px] text-slate-400">Stop-out equity (%)
+                  <input id="stopOutRatioInput" type="number" min="0" max="99.99" step="0.01" required inputmode="decimal" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                </label>
+                <label class="flex flex-col gap-1 text-[10px] text-slate-400">Rollover time (Armenia)
+                  <input id="rolloverTimeInput" type="time" required class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                </label>
+                <label class="flex flex-col gap-1 text-[10px] text-slate-400">Commission / share ($)
+                  <input id="commissionPerShareInput" type="number" min="0" step="0.001" required inputmode="decimal" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                </label>
+                <label class="flex flex-col gap-1 text-[10px] text-slate-400">Commission by value (%)
+                  <input id="commissionVolumeInput" type="number" min="0" max="100" step="0.01" required inputmode="decimal" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                </label>
+                <label class="flex flex-col gap-1 text-[10px] text-slate-400">Minimum commission / order ($)
+                  <input id="minimumCommissionInput" type="number" min="0" step="0.01" required inputmode="decimal" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                </label>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <button type="submit" class="rounded bg-cyan-800 px-3 py-1.5 text-xs font-bold text-cyan-100 hover:bg-cyan-700">Save assumptions</button>
+                <button id="resetBrokerRulesButton" type="button" class="rounded border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800">Restore defaults</button>
+                <span class="text-[10px] text-slate-500">Saved in this browser. Confirm rates with your broker.</span>
+              </div>
+            </form>
+            <form id="quoteSymbolForm" class="space-y-2">
+              <p class="text-[10px] uppercase tracking-wider text-slate-500">Provider-specific symbols</p>
+              <div class="grid grid-cols-2 gap-2">
+                <label class="col-span-2 flex flex-col gap-1 text-[10px] text-slate-400">Portfolio ticker
+                  <input id="quoteMappingTickerInput" type="text" placeholder="e.g. 7203" required autocapitalize="characters" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white uppercase">
+                </label>
+                <label class="flex flex-col gap-1 text-[10px] text-slate-400">Finnhub symbol
+                  <input id="finnhubSymbolInput" type="text" placeholder="e.g. TSE:7203" autocapitalize="characters" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white uppercase">
+                </label>
+                <label class="flex flex-col gap-1 text-[10px] text-slate-400">Stooq symbol
+                  <input id="stooqSymbolInput" type="text" placeholder="e.g. 7203.jp" autocapitalize="characters" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white lowercase">
+                </label>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <button type="submit" class="rounded bg-cyan-800 px-3 py-1.5 text-xs font-bold text-cyan-100 hover:bg-cyan-700">Save quote symbols</button>
+                <span id="quoteMappingStatus" class="text-[10px] text-slate-500">Blank provider symbol uses its default US ticker format.</span>
+              </div>
+              <p class="text-[10px] text-slate-500">Console: <code>quote symbol 7203 finnhub=TSE:7203 stooq=7203.jp</code>. Use <code>default</code> to clear a mapping.</p>
+            </form>
+          </div>
+        </details>
+
         <div class="flex flex-wrap items-end gap-2">
           <div id="headerCredentialsFields" class="flex flex-wrap items-end gap-2">
           <div class="flex flex-col gap-1 min-w-[120px]">
@@ -138,7 +200,10 @@
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-300">
           <div><span class="text-slate-500">Tranches / Holdings:</span> <span id="boardTranches" class="text-white font-medium">None</span></div>
           <div><span class="text-slate-500">Total Invested | Avg:</span> <span id="boardInvested" class="text-white font-medium">$0.00 | $0.00</span></div>
-          <div><span class="text-slate-500">Share Price | Mkt Value:</span> <span id="boardPrice" class="text-emerald-400 font-medium">$0.00 | $0.00 – +$0.00 (+0.00%)</span></div>
+          <div>
+            <span class="text-slate-500">Share Price | Mkt Value:</span> <span id="boardPrice" class="text-emerald-400 font-medium">$0.00 | $0.00 – +$0.00 (+0.00%)</span>
+            <span id="boardQuoteMeta" class="ml-2 text-[10px] text-slate-500"></span>
+          </div>
           <div><span class="text-slate-500">Margin Debt:</span> <span id="boardMargin" class="text-rose-400 font-medium">-$0.00</span></div>
           <div><span class="text-slate-500">Total Commissions:</span> <span id="boardComms" class="text-white font-medium">$0.00</span></div>
           <div><span class="text-slate-500">Margin Charged to Date:</span> <span id="boardMarginCharged" class="text-white font-medium">$0.00</span></div>
@@ -152,7 +217,7 @@
             <div id="boardMarginCallRow" class="hidden" title="Estimate assumes the configured maintenance-margin ratio and that the full allocated cushion qualifies as collateral. Actual broker requirements may differ.">
               <span class="text-slate-500">Margin-call trigger:</span> <span id="boardMarginCall" class="text-amber-400 font-bold font-mono"></span>
             </div>
-            <div id="boardStopOutRow" class="hidden" title="Estimate assumes the configured 0% equity stop-out threshold and that the full allocated cushion qualifies as collateral. Actual broker requirements may differ.">
+            <div id="boardStopOutRow" class="hidden" title="Estimate assumes the configured stop-out threshold and that the full allocated cushion qualifies as collateral. Actual broker requirements may differ.">
               <span class="text-slate-500">Stop-out trigger:</span> <span id="boardStopOut" class="text-rose-400 font-bold font-mono"></span>
             </div>
           </div>
@@ -220,12 +285,12 @@
           </div>
 
           <div class="overflow-x-auto">
-            <table class="w-full min-w-[620px] text-left text-xs border-collapse">
+            <table class="w-full min-w-[680px] text-left text-xs border-collapse">
               <thead>
                 <tr class="border-b border-slate-800 text-slate-400 font-medium">
                   <th class="py-2 px-3">Ticker</th>
                   <th class="py-2 px-3 text-right">Shares</th>
-                  <th class="py-2 px-3 text-right">Price / Share</th>
+                  <th class="py-2 px-3 text-right">Price / Share · Quote</th>
                   <th class="py-2 px-3 text-right">Market Value</th>
                   <th class="py-2 px-3 text-right">Stock Allocation</th>
                   <th class="py-2 px-3 text-center">Actions</th>
@@ -295,6 +360,7 @@
           <div><span class="text-purple-400 font-bold">Ladder Exit:</span> sell 10 JBL for 305 today and 10 for 315 in 7 days</div>
           <div><span class="text-cyan-400 font-bold">Exit Comparison:</span> sell today for 300 vs sell 10 days later for 310</div>
           <div><span class="text-amber-400 font-bold">Live Market Quote:</span> quote JBL <span class="text-slate-600 italic">or</span> what's the current JBL price?</div>
+          <div><span class="text-cyan-400 font-bold">Quote Symbol:</span> quote symbol 7203 finnhub=TSE:7203 stooq=7203.jp</div>
           <div><span class="text-emerald-400 font-bold">Sync Margin Debt:</span> b: -5000</div>
           <div><span class="text-rose-400 font-bold">Close Position:</span> sold all JBL for 305</div>
         </div>
