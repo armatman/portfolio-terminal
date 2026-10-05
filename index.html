@@ -209,7 +209,7 @@
       <div class="pt-3 mt-3 border-t border-slate-800">
         <p class="text-[10px] text-slate-500 uppercase tracking-wider mb-2 font-bold">Quick Commands Guide</p>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2 text-xs text-slate-400">
-          <div><span class="text-emerald-400 font-bold">Buy Margin Shares:</span> bought 20 JBL for 290, pt 305</div>
+          <div><span class="text-emerald-400 font-bold">Buy Shares:</span> bought 20 JBL for 290, pt 305</div>
           <div><span class="text-cyan-400 font-bold">Cash Stock (Auto-price):</span> add cash stock 50 AAPL <span class="text-slate-600 italic">or</span> remove cash stock AAPL</div>
           <div><span class="text-cyan-400 font-bold">Free Cash:</span> free cash 5000 <span class="text-slate-600 italic">or</span> cash 3500</div>
           <div><span class="text-purple-400 font-bold">Ladder Exit:</span> sell 10 JBL for 305 today and 10 for 315 in 7 days</div>
@@ -362,7 +362,6 @@
       }
     }
 
-    // PULL & REWRITE: Cloud data always overwrites local data and localStorage
     async function pullStateFromGistOnLoad() {
       const gistId = extractCleanGistId(localStorage.getItem('github_gist_id'));
       const token = (localStorage.getItem('github_pat_token') || '').trim();
@@ -400,16 +399,12 @@
         }
 
         if (remoteState && typeof remoteState === 'object') {
-          // Normalise schema
           if (!remoteState.positions || typeof remoteState.positions !== 'object') remoteState.positions = {};
           if (remoteState.marginBalance === undefined) remoteState.marginBalance = 0.00;
           if (!remoteState.cashCushion) remoteState.cashCushion = { freeCash: 0.00, holdings: [] };
           if (!remoteState.startDate) remoteState.startDate = new Date().toISOString().split('T')[0];
           
-          // Rewrite memory state
           state = remoteState;
-
-          // Rewrite local storage with the cloud state
           localStorage.setItem('margin_portfolio_state_dynamic_v2', JSON.stringify(state));
 
           setGistStatus('synced', 'ONLINE');
@@ -451,10 +446,8 @@
       const savedToken = localStorage.getItem('github_pat_token');
       if (savedToken) document.getElementById('githubTokenInput').value = savedToken;
 
-      // On load: Pull cloud data first. If present, it rewrites local storage.
       const pulled = await pullStateFromGistOnLoad();
       if (!pulled) {
-        // Fall back to local data only if cloud is unreachable or unconfigured
         const saved = localStorage.getItem('margin_portfolio_state_dynamic_v2');
         if (saved) {
           try {
@@ -505,8 +498,6 @@
       localStorage.setItem('github_pat_token', token);
 
       logTerminal("[System]: Credentials saved.");
-      
-      // Pull and rewrite local data with cloud data immediately if Gist is set
       if (cleanGistId) {
         await pullCloudAndRewriteLocal();
       }
@@ -1353,6 +1344,9 @@
       logTerminal(html, false, true);
     }
 
+    // ==========================================
+    // PORTFOLIO ACTIONS (CASH-FIRST ORDER FLOW)
+    // ==========================================
     async function applyPortfolioActions(action) {
       const todayDateStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
 
@@ -1388,15 +1382,37 @@
         pos.currentPrice = price;
         if (action.pt) pos.pt = Number(action.pt);
 
-        state.marginBalance = state.marginBalance - totalOutlay;
+        // 1. Consume Free Cash first
+        const currentFreeCash = Number(state.cashCushion?.freeCash) || 0;
+        const cashUsed = Math.min(currentFreeCash, totalOutlay);
+        const debtAdded = totalOutlay - cashUsed;
+
+        if (cashUsed > 0) {
+          state.cashCushion.freeCash = currentFreeCash - cashUsed;
+        }
+
+        // 2. Only the remaining unpaid portion increases margin debt
+        state.marginBalance = state.marginBalance - debtAdded;
         state.activeView = ticker;
 
         saveState();
-        logTerminal(`[Executed Buy]: Added ${shares} ${ticker} @ $${formatUSD(price)}. Outlay: $${formatUSD(totalOutlay)} (Comm: $${formatUSD(buyComm)}). Total Debt: -$${formatUSD(Math.abs(state.marginBalance))}.`);
+        logTerminal(`[Executed Buy]: Added ${shares} ${ticker} @ $${formatUSD(price)}. Outlay: $${formatUSD(totalOutlay)} (Comm: $${formatUSD(buyComm)}). Funded: $${formatUSD(cashUsed)} cash | +$${formatUSD(debtAdded)} margin debt. Free Cash remaining: $${formatUSD(state.cashCushion.freeCash)}. Total Margin Debt: -$${formatUSD(Math.abs(state.marginBalance))}.`);
       } 
       else if (action.action === "sell") {
         const ticker = action.ticker.toUpperCase();
-        const pos = state.positions[ticker];
+        let pos = state.positions[ticker];
+        let isCashHolding = false;
+        let cashHoldingIdx = -1;
+
+        // Check if closing a cash-held stock instead of a margin position
+        if (!pos && state.cashCushion && state.cashCushion.holdings) {
+          cashHoldingIdx = state.cashCushion.holdings.findIndex(h => h.ticker === ticker);
+          if (cashHoldingIdx !== -1) {
+            isCashHolding = true;
+            pos = state.cashCushion.holdings[cashHoldingIdx];
+          }
+        }
+
         if (!pos) {
           logTerminal(`[Error]: Position ${ticker} not found to close.`);
           return;
@@ -1408,19 +1424,48 @@
         const sellComm = calcCommission(sharesToSell, grossProceeds);
         const netCashCredited = grossProceeds - sellComm;
 
-        state.marginBalance = state.marginBalance + netCashCredited;
-        if (pos.marginCharged) {
-          state.realizedMarginCharged = (state.realizedMarginCharged || 0) + pos.marginCharged;
+        // 1. Pay down existing margin debt first
+        const currentDebt = Math.abs(state.marginBalance);
+        let debtRepaid = 0;
+        let cashSurplus = 0;
+
+        if (currentDebt > 0) {
+          debtRepaid = Math.min(currentDebt, netCashCredited);
+          state.marginBalance = currentDebt > debtRepaid ? -(currentDebt - debtRepaid) : 0;
+          cashSurplus = netCashCredited - debtRepaid;
+        } else {
+          cashSurplus = netCashCredited;
         }
 
-        if (sharesToSell >= pos.shares) {
-          delete state.positions[ticker];
-          state.activeView = "COMBINED";
-          logTerminal(`[Position Closed]: Sold ${sharesToSell} ${ticker} @ $${formatUSD(sellPrice)}. Net cash credited: +$${formatUSD(netCashCredited)}. Debt: -$${formatUSD(Math.abs(state.marginBalance))}.`);
-        } else {
-          pos.shares -= sharesToSell;
-          logTerminal(`[Partial Sell]: Sold ${sharesToSell} ${ticker} @ $${formatUSD(sellPrice)}. Remaining: ${pos.shares} shares.`);
+        // 2. Overflow proceeds automatically replenish Free Uninvested Cash
+        if (cashSurplus > 0) {
+          if (!state.cashCushion) state.cashCushion = { freeCash: 0.00, holdings: [] };
+          state.cashCushion.freeCash = (Number(state.cashCushion.freeCash) || 0) + cashSurplus;
         }
+
+        if (isCashHolding) {
+          if (sharesToSell >= pos.shares) {
+            state.cashCushion.holdings.splice(cashHoldingIdx, 1);
+            logTerminal(`[Cash Holding Closed]: Sold ${sharesToSell} ${ticker} @ $${formatUSD(sellPrice)}. Net credited: +$${formatUSD(netCashCredited)} (Debt paid: $${formatUSD(debtRepaid)}, Free Cash added: $${formatUSD(cashSurplus)}).`);
+          } else {
+            pos.shares -= sharesToSell;
+            logTerminal(`[Cash Holding Partial Sell]: Sold ${sharesToSell} ${ticker} @ $${formatUSD(sellPrice)}. Remaining: ${pos.shares} shares.`);
+          }
+        } else {
+          if (pos.marginCharged) {
+            state.realizedMarginCharged = (state.realizedMarginCharged || 0) + pos.marginCharged;
+          }
+
+          if (sharesToSell >= pos.shares) {
+            delete state.positions[ticker];
+            state.activeView = "COMBINED";
+            logTerminal(`[Position Closed]: Sold ${sharesToSell} ${ticker} @ $${formatUSD(sellPrice)}. Net credited: +$${formatUSD(netCashCredited)} (Debt paid: $${formatUSD(debtRepaid)}, Free Cash added: $${formatUSD(cashSurplus)}). Remaining Debt: -$${formatUSD(Math.abs(state.marginBalance))}. Free Cash: $${formatUSD(state.cashCushion.freeCash)}.`);
+          } else {
+            pos.shares -= sharesToSell;
+            logTerminal(`[Partial Sell]: Sold ${sharesToSell} ${ticker} @ $${formatUSD(sellPrice)}. Net credited: +$${formatUSD(netCashCredited)} (Debt paid: $${formatUSD(debtRepaid)}, Free Cash added: $${formatUSD(cashSurplus)}). Remaining: ${pos.shares} shares.`);
+          }
+        }
+
         saveState();
       }
       else if (action.action === "set_pt") {
@@ -1597,7 +1642,7 @@ Classify intent into ONE JSON structure (NO markdown backticks, raw JSON only):
   "ticker": "<ticker symbol, default to activeView>"
 }
 
-8. BUYING MARGIN SHARES:
+8. BUYING SHARES:
 {
   "intent": "action",
   "action": "buy",
@@ -1608,7 +1653,7 @@ Classify intent into ONE JSON structure (NO markdown backticks, raw JSON only):
   "date": "<e.g. 05 Oct or null>"
 }
 
-9. SELLING / CLOSING MARGIN SHARES:
+9. SELLING / CLOSING SHARES:
 {
   "intent": "action",
   "action": "sell",
