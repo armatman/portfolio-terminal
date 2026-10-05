@@ -13,7 +13,7 @@
 <body class="p-4 md:p-8">
   <div class="max-w-5xl mx-auto space-y-6">
     
-    <!-- Top Bar: Status, Keys, npoint Cloud Sync, Reset & Backups -->
+    <!-- Top Bar: Status, Keys, npoint Sync, Reset & Backups -->
     <div class="border-card p-4 rounded-lg flex flex-wrap items-center justify-between gap-4">
       <div>
         <div class="flex items-center gap-2">
@@ -33,14 +33,14 @@
       
       <div class="flex flex-wrap items-center gap-2">
         <input id="apiKeyInput" type="password" placeholder="Gemini Studio Key" 
-               class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-emerald-500 w-36 text-slate-200">
+               class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-emerald-500 w-32 text-slate-200">
         
         <input id="finnhubKeyInput" type="password" placeholder="Finnhub Key" 
                title="Free key from finnhub.io for direct real-time quotes"
-               class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-cyan-500 w-28 text-slate-200">
+               class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-cyan-500 w-24 text-slate-200">
 
-        <input id="npointInput" type="text" placeholder="npoint URL or Bin ID" 
-               title="Paste your npoint URL (e.g. https://api.npoint.io/xxxxxx) or Bin ID"
+        <input id="npointIdInput" type="text" placeholder="npoint Bin ID (e.g. 5a1b2c3d)" 
+               title="Paste your npoint.io bin ID or full URL"
                class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-purple-500 w-44 text-slate-200">
 
         <button onclick="saveApiKeys()" class="bg-emerald-600 hover:bg-emerald-500 text-black text-xs font-bold px-3 py-2 rounded transition">
@@ -184,7 +184,7 @@
       </div>
       
       <div id="terminalLog" class="h-64 overflow-y-auto bg-slate-950 p-3 rounded text-xs space-y-2 border border-slate-800/80">
-        <div class="text-slate-500">[System]: Ready. Direct npoint.io cloud synchronization active.</div>
+        <div class="text-slate-500">[System]: Ready. Encoded npoint.io synchronization active.</div>
       </div>
 
       <div class="flex gap-2">
@@ -254,21 +254,36 @@
     }
 
     let state = createBlankState();
-    let cloudSyncTimeout = null;
+    let npointSyncTimeout = null;
 
     // ==========================================
-    // NPOINT.IO CLOUD REPLICATION ENGINE
+    // NPOINT.IO ENCODING / DECODING ENGINE
     // ==========================================
-    function getResolvedNpointUrl(rawTarget) {
-      if (!rawTarget) return "";
-      let target = rawTarget.trim();
-      if (!target.startsWith("http://") && !target.startsWith("https://")) {
-        return `https://api.npoint.io/${target}`;
-      }
-      return target;
+    function encodePayload(obj) {
+      const jsonStr = JSON.stringify(obj);
+      return btoa(encodeURIComponent(jsonStr).replace(/%([0-9A-F]{2})/g, function(match, p1) {
+        return String.fromCharCode('0x' + p1);
+      }));
     }
 
-    function setCloudStatus(status, text) {
+    function decodePayload(str) {
+      const jsonStr = decodeURIComponent(Array.prototype.map.call(atob(str), function(c) {
+        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+      }).join(''));
+      return JSON.parse(jsonStr);
+    }
+
+    function resolveNpointUrl(rawInput) {
+      if (!rawInput) return "";
+      let trimmed = rawInput.trim();
+      if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+        trimmed = trimmed.replace(/^\/+|\/+$/g, '');
+        return `https://api.npoint.io/${trimmed}`;
+      }
+      return trimmed;
+    }
+
+    function setNpointStatus(status, text) {
       const dot = document.getElementById('cloudStatusDot');
       const label = document.getElementById('cloudStatusText');
       if (!dot || !label) return;
@@ -287,70 +302,75 @@
       }
     }
 
-    async function pushStateToCloud(forceImmediate = false) {
-      const rawTarget = localStorage.getItem('npoint_endpoint');
-      const endpoint = getResolvedNpointUrl(rawTarget);
+    async function pushStateToNpoint(forceImmediate = false) {
+      const rawInput = localStorage.getItem('npoint_bin_id');
+      const endpoint = resolveNpointUrl(rawInput);
       if (!endpoint) return;
 
       state.lastUpdated = Date.now();
 
       const doPush = async () => {
-        setCloudStatus('syncing', 'WRITING...');
+        setNpointStatus('syncing', 'WRITING...');
         try {
+          const encodedStr = encodePayload(state);
+          const payload = {
+            v: 2,
+            updated: state.lastUpdated,
+            payload: encodedStr
+          };
+
           const res = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(state)
+            body: JSON.stringify(payload)
           });
 
-          if (!res.ok) {
-            logTerminal(`[npoint Write Error]: HTTP ${res.status}`);
-            setCloudStatus('error', 'FAIL');
-            return;
-          }
-          setCloudStatus('synced', 'UPDATED');
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          setNpointStatus('synced', 'UPDATED');
         } catch (err) {
-          setCloudStatus('error', 'FAIL');
+          setNpointStatus('error', 'FAIL');
         }
       };
 
       if (forceImmediate) {
-        if (cloudSyncTimeout) clearTimeout(cloudSyncTimeout);
+        if (npointSyncTimeout) clearTimeout(npointSyncTimeout);
         await doPush();
       } else {
-        if (cloudSyncTimeout) clearTimeout(cloudSyncTimeout);
-        cloudSyncTimeout = setTimeout(doPush, 600);
+        if (npointSyncTimeout) clearTimeout(npointSyncTimeout);
+        npointSyncTimeout = setTimeout(doPush, 600);
       }
     }
 
-    async function pullStateFromCloudOnLoad() {
-      const rawTarget = localStorage.getItem('npoint_endpoint');
-      const endpoint = getResolvedNpointUrl(rawTarget);
+    async function pullStateFromNpointOnLoad() {
+      const rawInput = localStorage.getItem('npoint_bin_id');
+      const endpoint = resolveNpointUrl(rawInput);
       if (!endpoint) return false;
 
-      setCloudStatus('syncing', 'FETCHING...');
+      setNpointStatus('syncing', 'FETCHING...');
       try {
         const res = await fetch(endpoint, { headers: { 'Accept': 'application/json' } });
-        if (!res.ok) {
-          logTerminal(`[npoint Read Error]: HTTP ${res.status}`);
-          setCloudStatus('error', 'FAIL');
-          return false;
-        }
+        if (!res.ok) throw new Error("HTTP " + res.status);
 
         const data = await res.json();
-        const remoteState = data.record || data.data || data;
+        let remoteState = null;
+
+        if (data && data.payload && typeof data.payload === 'string') {
+          remoteState = decodePayload(data.payload);
+        } else if (data && typeof data === 'object' && data.positions) {
+          remoteState = data;
+        }
 
         if (remoteState && typeof remoteState === 'object' && remoteState.positions) {
           state = remoteState;
           if (!state.cashCushion) state.cashCushion = { freeCash: 0.00, holdings: [] };
           if (!state.positions) state.positions = {};
           localStorage.setItem('margin_portfolio_state_dynamic_v2', JSON.stringify(state));
-          setCloudStatus('synced', 'ONLINE');
-          logTerminal("[npoint]: Successfully loaded and synced state from npoint bin.");
+          setNpointStatus('synced', 'ONLINE');
+          logTerminal("[npoint]: Successfully decrypted and loaded remote portfolio state.");
           return true;
         }
       } catch (e) {
-        setCloudStatus('error', 'OFFLINE');
+        setNpointStatus('error', 'OFFLINE');
       }
       return false;
     }
@@ -362,10 +382,10 @@
       const savedFinnhub = localStorage.getItem('finnhub_api_key');
       if (savedFinnhub) document.getElementById('finnhubKeyInput').value = savedFinnhub;
 
-      const savedNpoint = localStorage.getItem('npoint_endpoint');
-      if (savedNpoint) document.getElementById('npointInput').value = savedNpoint;
+      const savedNpoint = localStorage.getItem('npoint_bin_id');
+      if (savedNpoint) document.getElementById('npointIdInput').value = savedNpoint;
 
-      const pulled = await pullStateFromCloudOnLoad();
+      const pulled = await pullStateFromNpointOnLoad();
       if (!pulled) {
         const saved = localStorage.getItem('margin_portfolio_state_dynamic_v2');
         if (saved) {
@@ -389,14 +409,14 @@
     function saveState() {
       state.lastUpdated = Date.now();
       localStorage.setItem('margin_portfolio_state_dynamic_v2', JSON.stringify(state));
-      pushStateToCloud(false);
+      pushStateToNpoint(false);
     }
 
     function resetToBlankState() {
       if (confirm("Reset the entire terminal to a blank slate? This will clear all holdings, balances, and history locally and on npoint.")) {
         state = createBlankState();
         saveState();
-        pushStateToCloud(true);
+        pushStateToNpoint(true);
         renderBoard();
         logTerminal("[System]: Portfolio reset to a clean blank slate.");
       }
@@ -409,12 +429,12 @@
       const fKey = document.getElementById('finnhubKeyInput').value.trim();
       localStorage.setItem('finnhub_api_key', fKey);
 
-      const npointVal = document.getElementById('npointInput').value.trim();
-      localStorage.setItem('npoint_endpoint', npointVal);
+      const npointId = document.getElementById('npointIdInput').value.trim();
+      localStorage.setItem('npoint_bin_id', npointId);
 
       logTerminal("[System]: Credentials saved.");
-      if (npointVal) {
-        pushStateToCloud(true);
+      if (npointId) {
+        pushStateToNpoint(true);
       }
     }
 
@@ -1035,7 +1055,7 @@
             if (!state.positions) state.positions = {};
             
             localStorage.setItem('margin_portfolio_state_dynamic_v2', JSON.stringify(state));
-            await pushStateToCloud(true);
+            await pushStateToNpoint(true);
             renderBoard();
             logTerminal(`[Backup Import]: Successfully imported ${file.name}. npoint data overwritten.`);
           } else {
