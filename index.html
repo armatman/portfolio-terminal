@@ -13,7 +13,7 @@
 <body class="p-4 md:p-8">
   <div class="max-w-5xl mx-auto space-y-6">
     
-    <!-- Top Bar: Status, Keys, Cloud Sync, Reset & Backups -->
+    <!-- Top Bar: Status, Keys, npoint Cloud Sync, Reset & Backups -->
     <div class="border-card p-4 rounded-lg flex flex-wrap items-center justify-between gap-4">
       <div>
         <div class="flex items-center gap-2">
@@ -23,7 +23,7 @@
           </span>
           <span id="cloudStatusBadge" class="bg-slate-900 text-slate-400 border border-slate-700 text-[10px] font-black px-2 py-0.5 rounded tracking-wide flex items-center gap-1">
             <span class="w-1.5 h-1.5 rounded-full bg-slate-500" id="cloudStatusDot"></span>
-            <span id="cloudStatusText">CLOUD: IDLE</span>
+            <span id="cloudStatusText">NPOINT: IDLE</span>
           </span>
         </div>
         <p class="text-xs text-slate-400 mt-0.5" id="rulesSummary">
@@ -33,19 +33,15 @@
       
       <div class="flex flex-wrap items-center gap-2">
         <input id="apiKeyInput" type="password" placeholder="Gemini Studio Key" 
-               class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-emerald-500 w-32 text-slate-200">
+               class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-emerald-500 w-36 text-slate-200">
         
         <input id="finnhubKeyInput" type="password" placeholder="Finnhub Key" 
                title="Free key from finnhub.io for direct real-time quotes"
-               class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-cyan-500 w-24 text-slate-200">
+               class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-cyan-500 w-28 text-slate-200">
 
-        <input id="cloudEndpointInput" type="text" placeholder="Cloud URL / Bin ID" 
-               title="JSONBin Bin ID (e.g. 6701a2b3...) or full REST Endpoint URL"
-               class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-purple-500 w-36 text-slate-200">
-
-        <input id="cloudMasterKeyInput" type="password" placeholder="Cloud API Key" 
-               title="Master Key (e.g. $2a$10$... for JSONBin X-Master-Key)"
-               class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-purple-500 w-28 text-slate-200">
+        <input id="npointInput" type="text" placeholder="npoint URL or Bin ID" 
+               title="Paste your npoint URL (e.g. https://api.npoint.io/xxxxxx) or Bin ID"
+               class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-purple-500 w-44 text-slate-200">
 
         <button onclick="saveApiKeys()" class="bg-emerald-600 hover:bg-emerald-500 text-black text-xs font-bold px-3 py-2 rounded transition">
           Save Keys
@@ -59,7 +55,7 @@
           Export
         </button>
         
-        <label class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-purple-300 text-xs font-bold px-3 py-2 rounded transition cursor-pointer" title="Import JSON file & overwrite cloud immediately">
+        <label class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-purple-300 text-xs font-bold px-3 py-2 rounded transition cursor-pointer" title="Import JSON file & overwrite npoint immediately">
           Import
           <input type="file" id="importFileInput" class="hidden" accept=".json" onchange="importBackupJSON(event)">
         </label>
@@ -188,7 +184,7 @@
       </div>
       
       <div id="terminalLog" class="h-64 overflow-y-auto bg-slate-950 p-3 rounded text-xs space-y-2 border border-slate-800/80">
-        <div class="text-slate-500">[System]: Ready. Direct JSONBin header injection active.</div>
+        <div class="text-slate-500">[System]: Ready. Direct npoint.io cloud synchronization active.</div>
       </div>
 
       <div class="flex gap-2">
@@ -261,26 +257,15 @@
     let cloudSyncTimeout = null;
 
     // ==========================================
-    // JSONBIN.IO & CLOUD HEADER ENGINE
+    // NPOINT.IO CLOUD REPLICATION ENGINE
     // ==========================================
-    function getResolvedCloudUrl(rawTarget) {
+    function getResolvedNpointUrl(rawTarget) {
       if (!rawTarget) return "";
       let target = rawTarget.trim();
-      // If user typed a clean bin id (e.g. 6701a2b3...), build the JSONBin v3 API URL
       if (!target.startsWith("http://") && !target.startsWith("https://")) {
-        return `https://api.jsonbin.io/v3/b/${target}`;
+        return `https://api.npoint.io/${target}`;
       }
       return target;
-    }
-
-    function getCloudHeaders() {
-      const headers = { 'Content-Type': 'application/json' };
-      const masterKey = localStorage.getItem('cloud_master_key');
-      if (masterKey) {
-        headers['X-Master-Key'] = masterKey.trim();
-        headers['X-Access-Key'] = masterKey.trim();
-      }
-      return headers;
     }
 
     function setCloudStatus(status, text) {
@@ -288,7 +273,7 @@
       const label = document.getElementById('cloudStatusText');
       if (!dot || !label) return;
 
-      label.innerText = `CLOUD: ${text.toUpperCase()}`;
+      label.innerText = `NPOINT: ${text.toUpperCase()}`;
       dot.className = "w-1.5 h-1.5 rounded-full";
 
       if (status === 'syncing') {
@@ -303,8 +288,8 @@
     }
 
     async function pushStateToCloud(forceImmediate = false) {
-      const rawTarget = localStorage.getItem('cloud_storage_endpoint');
-      const endpoint = getResolvedCloudUrl(rawTarget);
+      const rawTarget = localStorage.getItem('npoint_endpoint');
+      const endpoint = getResolvedNpointUrl(rawTarget);
       if (!endpoint) return;
 
       state.lastUpdated = Date.now();
@@ -312,17 +297,15 @@
       const doPush = async () => {
         setCloudStatus('syncing', 'WRITING...');
         try {
-          const headers = getCloudHeaders();
           const res = await fetch(endpoint, {
-            method: 'PUT',
-            headers: headers,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(state)
           });
 
           if (!res.ok) {
-            const errData = await res.json().catch(() => ({}));
-            logTerminal(`[Cloud Write Error]: HTTP ${res.status} ${errData.message || ''}`);
-            setCloudStatus('error', 'KEY ERR');
+            logTerminal(`[npoint Write Error]: HTTP ${res.status}`);
+            setCloudStatus('error', 'FAIL');
             return;
           }
           setCloudStatus('synced', 'UPDATED');
@@ -341,23 +324,16 @@
     }
 
     async function pullStateFromCloudOnLoad() {
-      const rawTarget = localStorage.getItem('cloud_storage_endpoint');
-      const endpoint = getResolvedCloudUrl(rawTarget);
+      const rawTarget = localStorage.getItem('npoint_endpoint');
+      const endpoint = getResolvedNpointUrl(rawTarget);
       if (!endpoint) return false;
 
       setCloudStatus('syncing', 'FETCHING...');
       try {
-        const headers = getCloudHeaders();
-        // Request latest bin content (for JSONBin.io /latest subpath)
-        const fetchUrl = endpoint.includes("jsonbin.io/v3/b/") && !endpoint.endsWith("/latest") 
-          ? `${endpoint}/latest` 
-          : endpoint;
-
-        const res = await fetch(fetchUrl, { headers: headers });
+        const res = await fetch(endpoint, { headers: { 'Accept': 'application/json' } });
         if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          logTerminal(`[Cloud Read Error]: HTTP ${res.status} ${errData.message || ''}`);
-          setCloudStatus('error', 'AUTH REQ');
+          logTerminal(`[npoint Read Error]: HTTP ${res.status}`);
+          setCloudStatus('error', 'FAIL');
           return false;
         }
 
@@ -370,7 +346,7 @@
           if (!state.positions) state.positions = {};
           localStorage.setItem('margin_portfolio_state_dynamic_v2', JSON.stringify(state));
           setCloudStatus('synced', 'ONLINE');
-          logTerminal("[Cloud]: Successfully connected and synced from remote bin.");
+          logTerminal("[npoint]: Successfully loaded and synced state from npoint bin.");
           return true;
         }
       } catch (e) {
@@ -386,11 +362,8 @@
       const savedFinnhub = localStorage.getItem('finnhub_api_key');
       if (savedFinnhub) document.getElementById('finnhubKeyInput').value = savedFinnhub;
 
-      const savedEndpoint = localStorage.getItem('cloud_storage_endpoint');
-      if (savedEndpoint) document.getElementById('cloudEndpointInput').value = savedEndpoint;
-
-      const savedMasterKey = localStorage.getItem('cloud_master_key');
-      if (savedMasterKey) document.getElementById('cloudMasterKeyInput').value = savedMasterKey;
+      const savedNpoint = localStorage.getItem('npoint_endpoint');
+      if (savedNpoint) document.getElementById('npointInput').value = savedNpoint;
 
       const pulled = await pullStateFromCloudOnLoad();
       if (!pulled) {
@@ -420,7 +393,7 @@
     }
 
     function resetToBlankState() {
-      if (confirm("Reset the entire terminal to a blank slate? This will clear all holdings, balances, and history locally and on the cloud.")) {
+      if (confirm("Reset the entire terminal to a blank slate? This will clear all holdings, balances, and history locally and on npoint.")) {
         state = createBlankState();
         saveState();
         pushStateToCloud(true);
@@ -436,14 +409,11 @@
       const fKey = document.getElementById('finnhubKeyInput').value.trim();
       localStorage.setItem('finnhub_api_key', fKey);
 
-      const cloudUrl = document.getElementById('cloudEndpointInput').value.trim();
-      localStorage.setItem('cloud_storage_endpoint', cloudUrl);
-
-      const cloudKey = document.getElementById('cloudMasterKeyInput').value.trim();
-      localStorage.setItem('cloud_master_key', cloudKey);
+      const npointVal = document.getElementById('npointInput').value.trim();
+      localStorage.setItem('npoint_endpoint', npointVal);
 
       logTerminal("[System]: Credentials saved.");
-      if (cloudUrl) {
+      if (npointVal) {
         pushStateToCloud(true);
       }
     }
@@ -1067,7 +1037,7 @@
             localStorage.setItem('margin_portfolio_state_dynamic_v2', JSON.stringify(state));
             await pushStateToCloud(true);
             renderBoard();
-            logTerminal(`[Backup Import]: Successfully imported ${file.name}. Cloud data overwritten.`);
+            logTerminal(`[Backup Import]: Successfully imported ${file.name}. npoint data overwritten.`);
           } else {
             throw new Error("Invalid structure");
           }
