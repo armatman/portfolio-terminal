@@ -1,3 +1,5 @@
+import { createBlankState, normalizePortfolioState, realizeClosedTrade, resolveTradeDateTimestamp } from './src/domain/portfolio.ts';
+
 // ==========================================
 // USER-CONFIGURABLE BROKER DEFAULT ASSUMPTIONS
 // ==========================================
@@ -22,68 +24,6 @@ const GIST_FILE_NAME = "margin_state.json";
 function formatUSD(val) {
   const num = Number(val) || 0;
   return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function resolveTradeDateTimestamp(value, fallbackTimestamp = Date.now()) {
-  if (!value) return fallbackTimestamp;
-  const shortDate = String(value).trim().match(/^(\d{1,2})\s+([a-z]{3,})(?:\s+(\d{4}))?$/i);
-  if (shortDate) {
-    const monthIndex = new Date(`${shortDate[2]} 1, 2000`).getMonth();
-    if (!Number.isNaN(monthIndex)) {
-      let year = shortDate[3] ? Number(shortDate[3]) : new Date(fallbackTimestamp).getFullYear();
-      let timestamp = new Date(year, monthIndex, Number(shortDate[1])).getTime();
-      if (!shortDate[3] && timestamp > fallbackTimestamp) {
-        year -= 1;
-        timestamp = new Date(year, monthIndex, Number(shortDate[1])).getTime();
-      }
-      return timestamp;
-    }
-  }
-
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : fallbackTimestamp;
-}
-
-function createBlankState() {
-  return {
-    activeView: "COMBINED",
-    marginBalance: 0.00,
-    realizedMarginCharged: 0.00,
-    startDate: new Date().toISOString().split('T')[0],
-    lastRolloverTimestamp: Date.now(),
-    lastUpdated: Date.now(),
-    cashCushion: {
-      freeCash: 0.00,
-      holdings: []
-    },
-    closedTrades: [],
-    quoteSymbols: {},
-    positions: {}
-  };
-}
-
-function normalizePortfolioState(candidate) {
-  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
-    throw new Error('Portfolio state must be an object.');
-  }
-
-  const blankState = createBlankState();
-  const normalized = { ...blankState, ...candidate };
-  normalized.cashCushion = {
-    ...blankState.cashCushion,
-    ...(candidate.cashCushion && typeof candidate.cashCushion === 'object' ? candidate.cashCushion : {})
-  };
-  if (!Array.isArray(normalized.cashCushion.holdings)) normalized.cashCushion.holdings = [];
-  if (!Array.isArray(normalized.closedTrades)) normalized.closedTrades = [];
-  if (!normalized.positions || typeof normalized.positions !== 'object' || Array.isArray(normalized.positions)) {
-    normalized.positions = {};
-  }
-  if (!normalized.quoteSymbols || typeof normalized.quoteSymbols !== 'object' || Array.isArray(normalized.quoteSymbols)) {
-    normalized.quoteSymbols = {};
-  }
-  if (!Number.isFinite(Number(normalized.lastRolloverTimestamp))) normalized.lastRolloverTimestamp = Date.now();
-  if (!normalized.startDate) normalized.startDate = blankState.startDate;
-  return normalized;
 }
 
 let state = createBlankState();
@@ -721,98 +661,6 @@ function getCashCushionTotal() {
   const cashVal = Number(state.cashCushion.freeCash) || 0;
   const stocksVal = (state.cashCushion.holdings || []).reduce((sum, h) => sum + (h.shares * h.price), 0);
   return cashVal + stocksVal;
-}
-
-function resolveTrancheAcquiredAt(tranche, fallbackDate) {
-  const acquiredAt = Number(tranche.acquiredAt);
-  if (Number.isFinite(acquiredAt) && acquiredAt > 0) return acquiredAt;
-
-  return resolveTradeDateTimestamp(tranche.date || fallbackDate, Date.now());
-}
-
-function realizeClosedTrade(pos, ticker, shares, sellPrice, sellCommission, closedAt) {
-  const originalShares = Number(pos.shares) || 0;
-  const tranches = Array.isArray(pos.tranches) ? pos.tranches : [];
-  const trancheShares = tranches.reduce((total, tranche) => total + Math.max(0, Number(tranche.qty) || 0), 0);
-  const scale = trancheShares > originalShares && trancheShares > 0 ? originalShares / trancheShares : 1;
-  const lots = tranches
-    .map(tranche => ({
-      ...tranche,
-      qty: Math.max(0, Number(tranche.qty) || 0) * scale,
-      price: Math.max(0, Number(tranche.price) || 0),
-      buyCommission: Math.max(0, Number(tranche.buyCommission) || 0) * scale
-    }))
-    .filter(tranche => tranche.qty > 0);
-  if (scale < 1) pos.commBuy = (Number(pos.commBuy) || 0) * scale;
-  const scaledTrancheShares = lots.reduce((total, tranche) => total + tranche.qty, 0);
-  const fallbackShares = Math.max(0, originalShares - scaledTrancheShares);
-  if (fallbackShares > 0) {
-    lots.push({
-      qty: fallbackShares,
-      price: scaledTrancheShares > 0
-        ? lots.reduce((total, tranche) => total + (tranche.qty * tranche.price), 0) / scaledTrancheShares
-        : 0,
-      acquiredAt: resolveTrancheAcquiredAt({}, pos.startDate)
-    });
-  }
-
-  const lotBuyCommissions = lots.reduce((total, tranche) => total + Math.max(0, Number(tranche.buyCommission) || 0), 0);
-  const unassignedBuyCommission = Math.max(0, (Number(pos.commBuy) || 0) - lotBuyCommissions);
-  const closedLots = [];
-  let remainingToClose = Math.min(shares, originalShares);
-
-  lots.forEach(tranche => {
-    if (remainingToClose <= 0) return;
-    const closedQty = Math.min(tranche.qty, remainingToClose);
-    if (closedQty <= 0) return;
-
-    const trancheCommission = Math.max(0, Number(tranche.buyCommission) || 0);
-    const legacyCommissionShare = originalShares > 0 ? (unassignedBuyCommission / originalShares) * closedQty : 0;
-    closedLots.push({
-      qty: closedQty,
-      cost: closedQty * tranche.price,
-      buyCommission: (tranche.qty > 0 ? trancheCommission * (closedQty / tranche.qty) : 0) + legacyCommissionShare,
-      acquiredAt: resolveTrancheAcquiredAt(tranche, pos.startDate)
-    });
-    tranche.buyCommission = Math.max(0, trancheCommission - (trancheCommission * (closedQty / tranche.qty)));
-    tranche.qty -= closedQty;
-    remainingToClose -= closedQty;
-  });
-
-  const closedShares = shares - remainingToClose;
-  const remainingLots = lots.filter(tranche => tranche.qty > 1e-8);
-  const costBasis = closedLots.reduce((total, lot) => total + lot.cost, 0);
-  const buyCommission = closedLots.reduce((total, lot) => total + lot.buyCommission, 0);
-  const durationWeightedMs = closedLots.reduce(
-    (total, lot) => total + (Math.max(0, closedAt - lot.acquiredAt) * lot.qty),
-    0
-  );
-  const holdingDays = closedShares > 0
-    ? Math.floor(durationWeightedMs / closedShares / 86400000)
-    : 0;
-  const marginFee = originalShares > 0
-    ? (Number(pos.marginCharged) || 0) * (closedShares / originalShares)
-    : 0;
-  const feesAndCommissions = buyCommission + sellCommission + marginFee;
-  const netProfit = (closedShares * sellPrice) - costBasis - feesAndCommissions;
-
-  if (!Array.isArray(state.closedTrades)) state.closedTrades = [];
-  if (closedShares > 0) {
-    state.closedTrades.push({
-      ticker,
-      date: closedAt,
-      shares: closedShares,
-      holdingDays,
-      feesAndCommissions,
-      netProfit
-    });
-  }
-
-  pos.shares = Math.max(0, originalShares - closedShares);
-  pos.tranches = remainingLots;
-  pos.commBuy = Math.max(0, (Number(pos.commBuy) || 0) - buyCommission);
-  pos.marginCharged = Math.max(0, (Number(pos.marginCharged) || 0) - marginFee);
-  return { marginFee, closedShares };
 }
 
 function updateCombinedBreakeven() {
@@ -2047,14 +1895,16 @@ async function applyPortfolioActions(action) {
       }
     } else {
       const realizedTrade = realizeClosedTrade(pos, ticker, sharesToSell, sellPrice, sellComm, Date.now());
+      state.positions[ticker] = realizedTrade.position;
+      if (realizedTrade.trade) state.closedTrades.push(realizedTrade.trade);
       state.realizedMarginCharged = (state.realizedMarginCharged || 0) + realizedTrade.marginFee;
 
-      if (pos.shares <= 1e-8) {
+      if (realizedTrade.position.shares <= 1e-8) {
         delete state.positions[ticker];
         state.activeView = "COMBINED";
         logTerminal(`[Position Closed]: Sold ${sharesToSell} ${ticker} @ $${formatUSD(sellPrice)}. Net credited: +$${formatUSD(netCashCredited)} (Debt paid: $${formatUSD(debtRepaid)}, Free Cash added: $${formatUSD(cashSurplus)}). Remaining Debt: -$${formatUSD(Math.abs(state.marginBalance))}. Free Cash: $${formatUSD(state.cashCushion.freeCash)}.`);
       } else {
-        logTerminal(`[Partial Sell]: Sold ${sharesToSell} ${ticker} @ $${formatUSD(sellPrice)}. Net credited: +$${formatUSD(netCashCredited)} (Debt paid: $${formatUSD(debtRepaid)}, Free Cash added: $${formatUSD(cashSurplus)}). Remaining: ${pos.shares} shares.`);
+        logTerminal(`[Partial Sell]: Sold ${sharesToSell} ${ticker} @ $${formatUSD(sellPrice)}. Net credited: +$${formatUSD(netCashCredited)} (Debt paid: $${formatUSD(debtRepaid)}, Free Cash added: $${formatUSD(cashSurplus)}). Remaining: ${realizedTrade.position.shares} shares.`);
       }
     }
 
@@ -2403,3 +2253,16 @@ window.onload = async () => {
   updateHeaderCredentialsVisibility();
   await refreshAllLivePrices();
 };
+
+Object.assign(window, {
+  addCashStockFromUI,
+  executeCommand,
+  exportBackupJSON,
+  importBackupJSON,
+  pullCloudAndRewriteLocal,
+  refreshAllLivePrices,
+  resetToBlankState,
+  saveApiKeys,
+  saveCurrentBalanceFromInput,
+  toggleHeaderCredentialsVisibility
+});
