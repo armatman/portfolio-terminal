@@ -98,17 +98,10 @@
         <div class="flex flex-wrap items-end gap-2">
           <div id="headerCredentialsFields" class="flex flex-wrap items-end gap-2">
           <div class="flex flex-col gap-1 min-w-[120px]">
-            <label for="geminiProxyUrlInput" class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Gemini Proxy</label>
-            <input id="geminiProxyUrlInput" type="url" placeholder="Worker URL" autocomplete="url"
-                   title="Your deployed Cloudflare Worker URL"
-                   class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-emerald-500 w-40 text-slate-200">
-          </div>
-
-          <div class="flex flex-col gap-1 min-w-[120px]">
-            <label for="geminiAccessTokenInput" class="text-[10px] uppercase tracking-[0.18em] text-slate-500">AI Access</label>
-            <input id="geminiAccessTokenInput" type="password" placeholder="Access token" autocomplete="off"
-                   title="Private token configured as a Cloudflare Worker secret"
-                   class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-emerald-500 w-36 text-slate-200">
+            <label for="apiKeyInput" class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Gemini</label>
+            <input id="apiKeyInput" type="password" placeholder="Studio Key" autocomplete="off"
+                   title="Kept for this browser session. It is sent directly from this browser to Google."
+                   class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-emerald-500 w-32 text-slate-200">
           </div>
 
           <div class="flex flex-col gap-1 min-w-[96px]">
@@ -146,7 +139,7 @@
             </button>
           </div>
         </div>
-        <p class="text-[10px] text-slate-500">The Gemini API key stays in the Cloudflare Worker. Your Worker URL and private access token are kept for this browser session.</p>
+        <p class="text-[10px] text-slate-500">Gemini requests go directly from this browser to Google. The key is kept for this browser session; never use a shared production key on a public site.</p>
 
         <div class="flex flex-wrap items-center justify-center gap-2">
           <button id="refreshQuotesButton" onclick="refreshAllLivePrices()" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-cyan-300 text-xs font-bold px-3 py-2 rounded transition flex items-center gap-1">

@@ -208,10 +208,8 @@ async function pullCloudAndRewriteLocal() {
 async function loadSavedState() {
   loadTradernetRules();
   localStorage.removeItem('gemini_api_key');
-  const savedProxyUrl = sessionStorage.getItem('gemini_proxy_url');
-  if (savedProxyUrl) document.getElementById('geminiProxyUrlInput').value = savedProxyUrl;
-  const savedAccessToken = sessionStorage.getItem('gemini_proxy_access_token');
-  if (savedAccessToken) document.getElementById('geminiAccessTokenInput').value = savedAccessToken;
+  const savedGeminiKey = sessionStorage.getItem('gemini_api_key');
+  if (savedGeminiKey) document.getElementById('apiKeyInput').value = savedGeminiKey;
 
   const savedFinnhub = localStorage.getItem('finnhub_api_key');
   if (savedFinnhub) document.getElementById('finnhubKeyInput').value = savedFinnhub;
@@ -245,7 +243,7 @@ async function loadSavedState() {
 let headerCredentialsHidden = false;
 
 function updateHeaderCredentialsVisibility() {
-  const inputIds = ['geminiProxyUrlInput', 'geminiAccessTokenInput', 'finnhubKeyInput', 'gistIdInput', 'githubTokenInput'];
+  const inputIds = ['apiKeyInput', 'finnhubKeyInput', 'gistIdInput', 'githubTokenInput'];
   const inputs = inputIds.map(id => document.getElementById(id));
   const allFieldsFilled = inputs.every(input => input.value.trim().length > 0);
   const fields = document.getElementById('headerCredentialsFields');
@@ -288,12 +286,9 @@ function resetToBlankState() {
 }
 
 async function saveApiKeys() {
-  const proxyUrl = document.getElementById('geminiProxyUrlInput').value.trim().replace(/\/+$/, '');
-  const accessToken = document.getElementById('geminiAccessTokenInput').value.trim();
-  if (proxyUrl) sessionStorage.setItem('gemini_proxy_url', proxyUrl);
-  else sessionStorage.removeItem('gemini_proxy_url');
-  if (accessToken) sessionStorage.setItem('gemini_proxy_access_token', accessToken);
-  else sessionStorage.removeItem('gemini_proxy_access_token');
+  const geminiKey = document.getElementById('apiKeyInput').value.trim();
+  if (geminiKey) sessionStorage.setItem('gemini_api_key', geminiKey);
+  else sessionStorage.removeItem('gemini_api_key');
   localStorage.removeItem('gemini_api_key');
 
   const fKey = document.getElementById('finnhubKeyInput').value.trim();
@@ -311,7 +306,7 @@ async function saveApiKeys() {
   showToast(
     syncConfigured
       ? 'Credentials saved. Checking cloud state...'
-      : 'Saved locally. A Gist ID and GitHub token are required to upload.',
+      : 'Gemini key saved for this session. Gist sync is not configured.',
     syncConfigured ? 'success' : 'warning'
   );
   if (cleanGistId) {
@@ -2059,35 +2054,6 @@ async function readGeminiResponse(response, operation) {
   return data;
 }
 
-function getGeminiProxyCredentials() {
-  const proxyUrl = (sessionStorage.getItem('gemini_proxy_url') || '').trim().replace(/\/+$/, '');
-  const accessToken = (sessionStorage.getItem('gemini_proxy_access_token') || '').trim();
-  if (!proxyUrl || !accessToken) {
-    throw new Error('Configure your Cloudflare Gemini Worker URL and access token, then click Save.');
-  }
-  let parsedUrl;
-  try {
-    parsedUrl = new URL(proxyUrl);
-  } catch {
-    throw new Error('Gemini Worker URL must be a valid HTTPS URL.');
-  }
-  if (parsedUrl.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(parsedUrl.hostname)) {
-    throw new Error('Gemini Worker URL must use HTTPS.');
-  }
-  return { proxyUrl, accessToken };
-}
-
-async function fetchGeminiProxy(path, accessToken, options = {}) {
-  const { proxyUrl } = getGeminiProxyCredentials();
-  return fetch(`${proxyUrl}/api/${path}`, {
-    ...options,
-    headers: {
-      ...options.headers,
-      Authorization: `Bearer ${accessToken}`
-    }
-  });
-}
-
 async function executeCommand() {
   const input = document.getElementById('cmdInput');
   const text = input.value.trim();
@@ -2126,6 +2092,13 @@ async function executeCommand() {
   const quoteMatch = text.match(/^(?:quote|price of|fetch price|get price)\s+([A-Za-z]+)$/i);
   if (quoteMatch) {
     fetchLivePrice(quoteMatch[1].toUpperCase());
+    return;
+  }
+
+  const apiKey = sessionStorage.getItem('gemini_api_key');
+  if (!apiKey) {
+    logTerminal("[Error]: Missing Gemini API key. Enter your Google AI Studio key above.");
+    showToast('Missing Gemini API key.', 'error');
     return;
   }
 
@@ -2251,8 +2224,13 @@ Classify intent into ONE JSON structure (NO markdown backticks, raw JSON only):
 `;
 
   try {
-    const { accessToken } = getGeminiProxyCredentials();
-    const listResponse = await fetchGeminiProxy('models', accessToken);
+    const requestHeaders = {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': apiKey
+    };
+    const listResponse = await fetch('https://generativelanguage.googleapis.com/v1beta/models', {
+      headers: { 'x-goog-api-key': apiKey }
+    });
     const listData = await readGeminiResponse(listResponse, 'model discovery');
     const activeModels = (Array.isArray(listData.models) ? listData.models : [])
       .filter(model => model.name && model.supportedGenerationMethods?.includes('generateContent'))
@@ -2271,9 +2249,9 @@ Classify intent into ONE JSON structure (NO markdown backticks, raw JSON only):
 
     for (const model of activeModels) {
       try {
-        const response = await fetchGeminiProxy(`generate?model=${encodeURIComponent(model)}`, accessToken, {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: requestHeaders,
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
             generationConfig: {
@@ -2359,7 +2337,7 @@ Classify intent into ONE JSON structure (NO markdown backticks, raw JSON only):
 window.onload = async () => {
   await loadSavedState();
   headerCredentialsHidden = localStorage.getItem('header_credentials_hidden') === 'true';
-  ['geminiProxyUrlInput', 'geminiAccessTokenInput', 'finnhubKeyInput', 'gistIdInput', 'githubTokenInput'].forEach(id => {
+  ['apiKeyInput', 'finnhubKeyInput', 'gistIdInput', 'githubTokenInput'].forEach(id => {
     document.getElementById(id).addEventListener('input', updateHeaderCredentialsVisibility);
   });
   const quoteRefreshInterval = document.getElementById('quoteRefreshInterval');
