@@ -330,6 +330,37 @@
 
     </div>
 
+    <!-- Closed Trade History -->
+    <div id="closedHistoryContainer" class="hidden border-card p-6 rounded-lg space-y-4">
+      <div class="flex flex-wrap justify-between items-end gap-2 border-b border-slate-800 pb-3">
+        <div>
+          <h2 class="text-lg font-black text-purple-300 tracking-wide">CLOSED TRADE HISTORY</h2>
+          <p class="text-xs text-slate-400">Realized margin trades, including partial sales. Net profit includes commissions and allocated margin fees.</p>
+        </div>
+        <span id="closedTradesCount" class="text-xs text-slate-400 font-mono"></span>
+      </div>
+
+      <div id="closedTradesEmptyState" class="hidden rounded border border-dashed border-slate-700 bg-slate-900/40 p-4 text-center text-xs text-slate-500">
+        No closed margin trades yet.
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full min-w-[700px] text-left text-xs border-collapse">
+          <thead>
+            <tr class="border-b border-slate-800 text-slate-400 font-medium">
+              <th class="py-2 px-3">Ticker</th>
+              <th class="py-2 px-3">Date Closed</th>
+              <th class="py-2 px-3 text-right">Shares</th>
+              <th class="py-2 px-3 text-right">Holding Duration</th>
+              <th class="py-2 px-3 text-right">Fees &amp; Commissions</th>
+              <th class="py-2 px-3 text-right">Net Profit</th>
+            </tr>
+          </thead>
+          <tbody id="closedTradesTableBody" class="divide-y divide-slate-800/60 font-mono"></tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Conversational Terminal Box -->
     <div class="border-card p-4 rounded-lg space-y-3">
       <div class="text-xs font-bold text-slate-400 uppercase tracking-wider flex justify-between items-center">

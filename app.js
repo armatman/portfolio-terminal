@@ -24,6 +24,26 @@ function formatUSD(val) {
   return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function resolveTradeDateTimestamp(value, fallbackTimestamp = Date.now()) {
+  if (!value) return fallbackTimestamp;
+  const shortDate = String(value).trim().match(/^(\d{1,2})\s+([a-z]{3,})(?:\s+(\d{4}))?$/i);
+  if (shortDate) {
+    const monthIndex = new Date(`${shortDate[2]} 1, 2000`).getMonth();
+    if (!Number.isNaN(monthIndex)) {
+      let year = shortDate[3] ? Number(shortDate[3]) : new Date(fallbackTimestamp).getFullYear();
+      let timestamp = new Date(year, monthIndex, Number(shortDate[1])).getTime();
+      if (!shortDate[3] && timestamp > fallbackTimestamp) {
+        year -= 1;
+        timestamp = new Date(year, monthIndex, Number(shortDate[1])).getTime();
+      }
+      return timestamp;
+    }
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : fallbackTimestamp;
+}
+
 function createBlankState() {
   return {
     activeView: "COMBINED",
@@ -36,6 +56,7 @@ function createBlankState() {
       freeCash: 0.00,
       holdings: []
     },
+    closedTrades: [],
     quoteSymbols: {},
     positions: {}
   };
@@ -53,6 +74,7 @@ function normalizePortfolioState(candidate) {
     ...(candidate.cashCushion && typeof candidate.cashCushion === 'object' ? candidate.cashCushion : {})
   };
   if (!Array.isArray(normalized.cashCushion.holdings)) normalized.cashCushion.holdings = [];
+  if (!Array.isArray(normalized.closedTrades)) normalized.closedTrades = [];
   if (!normalized.positions || typeof normalized.positions !== 'object' || Array.isArray(normalized.positions)) {
     normalized.positions = {};
   }
@@ -611,9 +633,13 @@ function applyOvernightRollover() {
     state.marginBalance = -compoundedDebt;
 
     const tickers = Object.keys(state.positions);
-    if (tickers.length === 1) {
-      const p = state.positions[tickers[0]];
-      p.marginCharged = (p.marginCharged || 0) + interestAccrued;
+    const totalInvested = getTotalPortfolioInvested();
+    if (tickers.length > 0 && totalInvested > 0) {
+      tickers.forEach(ticker => {
+        const position = state.positions[ticker];
+        const invested = (position.tranches || []).reduce((sum, tranche) => sum + (tranche.qty * tranche.price), 0);
+        position.marginCharged = (position.marginCharged || 0) + (interestAccrued * invested / totalInvested);
+      });
     } else {
       state.realizedMarginCharged = (state.realizedMarginCharged || 0) + interestAccrued;
     }
@@ -643,6 +669,98 @@ function getCashCushionTotal() {
   const cashVal = Number(state.cashCushion.freeCash) || 0;
   const stocksVal = (state.cashCushion.holdings || []).reduce((sum, h) => sum + (h.shares * h.price), 0);
   return cashVal + stocksVal;
+}
+
+function resolveTrancheAcquiredAt(tranche, fallbackDate) {
+  const acquiredAt = Number(tranche.acquiredAt);
+  if (Number.isFinite(acquiredAt) && acquiredAt > 0) return acquiredAt;
+
+  return resolveTradeDateTimestamp(tranche.date || fallbackDate, Date.now());
+}
+
+function realizeClosedTrade(pos, ticker, shares, sellPrice, sellCommission, closedAt) {
+  const originalShares = Number(pos.shares) || 0;
+  const tranches = Array.isArray(pos.tranches) ? pos.tranches : [];
+  const trancheShares = tranches.reduce((total, tranche) => total + Math.max(0, Number(tranche.qty) || 0), 0);
+  const scale = trancheShares > originalShares && trancheShares > 0 ? originalShares / trancheShares : 1;
+  const lots = tranches
+    .map(tranche => ({
+      ...tranche,
+      qty: Math.max(0, Number(tranche.qty) || 0) * scale,
+      price: Math.max(0, Number(tranche.price) || 0),
+      buyCommission: Math.max(0, Number(tranche.buyCommission) || 0) * scale
+    }))
+    .filter(tranche => tranche.qty > 0);
+  if (scale < 1) pos.commBuy = (Number(pos.commBuy) || 0) * scale;
+  const scaledTrancheShares = lots.reduce((total, tranche) => total + tranche.qty, 0);
+  const fallbackShares = Math.max(0, originalShares - scaledTrancheShares);
+  if (fallbackShares > 0) {
+    lots.push({
+      qty: fallbackShares,
+      price: scaledTrancheShares > 0
+        ? lots.reduce((total, tranche) => total + (tranche.qty * tranche.price), 0) / scaledTrancheShares
+        : 0,
+      acquiredAt: resolveTrancheAcquiredAt({}, pos.startDate)
+    });
+  }
+
+  const lotBuyCommissions = lots.reduce((total, tranche) => total + Math.max(0, Number(tranche.buyCommission) || 0), 0);
+  const unassignedBuyCommission = Math.max(0, (Number(pos.commBuy) || 0) - lotBuyCommissions);
+  const closedLots = [];
+  let remainingToClose = Math.min(shares, originalShares);
+
+  lots.forEach(tranche => {
+    if (remainingToClose <= 0) return;
+    const closedQty = Math.min(tranche.qty, remainingToClose);
+    if (closedQty <= 0) return;
+
+    const trancheCommission = Math.max(0, Number(tranche.buyCommission) || 0);
+    const legacyCommissionShare = originalShares > 0 ? (unassignedBuyCommission / originalShares) * closedQty : 0;
+    closedLots.push({
+      qty: closedQty,
+      cost: closedQty * tranche.price,
+      buyCommission: (tranche.qty > 0 ? trancheCommission * (closedQty / tranche.qty) : 0) + legacyCommissionShare,
+      acquiredAt: resolveTrancheAcquiredAt(tranche, pos.startDate)
+    });
+    tranche.buyCommission = Math.max(0, trancheCommission - (trancheCommission * (closedQty / tranche.qty)));
+    tranche.qty -= closedQty;
+    remainingToClose -= closedQty;
+  });
+
+  const closedShares = shares - remainingToClose;
+  const remainingLots = lots.filter(tranche => tranche.qty > 1e-8);
+  const costBasis = closedLots.reduce((total, lot) => total + lot.cost, 0);
+  const buyCommission = closedLots.reduce((total, lot) => total + lot.buyCommission, 0);
+  const durationWeightedMs = closedLots.reduce(
+    (total, lot) => total + (Math.max(0, closedAt - lot.acquiredAt) * lot.qty),
+    0
+  );
+  const holdingDays = closedShares > 0
+    ? Math.floor(durationWeightedMs / closedShares / 86400000)
+    : 0;
+  const marginFee = originalShares > 0
+    ? (Number(pos.marginCharged) || 0) * (closedShares / originalShares)
+    : 0;
+  const feesAndCommissions = buyCommission + sellCommission + marginFee;
+  const netProfit = (closedShares * sellPrice) - costBasis - feesAndCommissions;
+
+  if (!Array.isArray(state.closedTrades)) state.closedTrades = [];
+  if (closedShares > 0) {
+    state.closedTrades.push({
+      ticker,
+      date: closedAt,
+      shares: closedShares,
+      holdingDays,
+      feesAndCommissions,
+      netProfit
+    });
+  }
+
+  pos.shares = Math.max(0, originalShares - closedShares);
+  pos.tranches = remainingLots;
+  pos.commBuy = Math.max(0, (Number(pos.commBuy) || 0) - buyCommission);
+  pos.marginCharged = Math.max(0, (Number(pos.marginCharged) || 0) - marginFee);
+  return { marginFee, closedShares };
 }
 
 function updateCombinedBreakeven() {
@@ -708,23 +826,24 @@ function renderBoard() {
   tabsContainer.innerHTML = '';
 
   const isCushionActive = state.activeView === "CASH_CUSHION";
-  updateEmptyStateVisibility(tickers.length === 0 && !isCushionActive);
+  const isClosedHistoryActive = state.activeView === "CLOSED_HISTORY";
+  updateEmptyStateVisibility(tickers.length === 0 && !isCushionActive && !isClosedHistoryActive);
 
   if (tickers.length === 0) {
-    if (!isCushionActive) state.activeView = "COMBINED";
+    if (!isCushionActive && !isClosedHistoryActive) state.activeView = "COMBINED";
     const emptyLabel = document.createElement('span');
     emptyLabel.className = "text-xs font-bold text-slate-500 uppercase tracking-wider";
     emptyLabel.innerText = "NO ACTIVE TRADES";
     tabsContainer.appendChild(emptyLabel);
   } else if (tickers.length === 1) {
-    if (!isCushionActive) state.activeView = tickers[0];
+    if (!isCushionActive && !isClosedHistoryActive) state.activeView = tickers[0];
     const btn = document.createElement('button');
     btn.className = `px-3 py-1 rounded text-xs font-bold transition ${state.activeView === tickers[0] ? 'bg-emerald-600 text-black' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`;
     btn.innerText = `MARGIN: ${tickers[0]}`;
     btn.onclick = () => setActiveView(tickers[0]);
     tabsContainer.appendChild(btn);
   } else {
-    if (!isCushionActive && state.activeView !== "COMBINED" && !state.positions[state.activeView]) {
+    if (!isCushionActive && !isClosedHistoryActive && state.activeView !== "COMBINED" && !state.positions[state.activeView]) {
       state.activeView = "COMBINED";
     }
 
@@ -750,20 +869,38 @@ function renderBoard() {
   cushionBtn.onclick = () => setActiveView("CASH_CUSHION");
   tabsContainer.appendChild(cushionBtn);
 
+  const closedHistoryBtn = document.createElement('button');
+  closedHistoryBtn.className = `px-3 py-1 rounded text-xs font-bold transition ${isClosedHistoryActive ? 'bg-purple-500 text-black' : 'bg-slate-900 border border-purple-800/60 text-purple-300 hover:bg-slate-800'}`;
+  closedHistoryBtn.innerText = `CLOSED HISTORY (${state.closedTrades.length})`;
+  closedHistoryBtn.onclick = () => setActiveView("CLOSED_HISTORY");
+  tabsContainer.appendChild(closedHistoryBtn);
+  document.getElementById('closedTradesCount').textContent =
+    `${state.closedTrades.length} realized exit${state.closedTrades.length === 1 ? '' : 's'}`;
+
   const mainDesk = document.getElementById('mainDeskContainer');
   const cushionDesk = document.getElementById('cashCushionContainer');
+  const closedHistoryDesk = document.getElementById('closedHistoryContainer');
   let activeDesk;
   let activeDeskView;
 
   if (isCushionActive) {
     mainDesk.classList.add('hidden');
     cushionDesk.classList.remove('hidden');
+    closedHistoryDesk.classList.add('hidden');
     renderCashCushionPanel();
     activeDesk = cushionDesk;
     activeDeskView = 'CASH_CUSHION';
+  } else if (isClosedHistoryActive) {
+    mainDesk.classList.add('hidden');
+    cushionDesk.classList.add('hidden');
+    closedHistoryDesk.classList.remove('hidden');
+    renderClosedHistoryPanel();
+    activeDesk = closedHistoryDesk;
+    activeDeskView = 'CLOSED_HISTORY';
   } else {
     mainDesk.classList.remove('hidden');
     cushionDesk.classList.add('hidden');
+    closedHistoryDesk.classList.add('hidden');
 
     if (state.activeView === "COMBINED" && tickers.length !== 1) {
       renderCombinedView(tickers);
@@ -873,6 +1010,44 @@ function renderCashCushionPanel() {
 
   const totalCushion = freeCash + stocksTotal;
   document.getElementById('cushionTotalValue').innerText = `$${formatUSD(totalCushion)}`;
+}
+
+function renderClosedHistoryPanel() {
+  const tableBody = document.getElementById('closedTradesTableBody');
+  tableBody.innerHTML = '';
+
+  const trades = [...state.closedTrades].sort((a, b) => Number(b.date) - Number(a.date));
+  trades.forEach(trade => {
+    const row = document.createElement('tr');
+    row.className = 'border-b border-slate-800/60 text-slate-300';
+
+    const dateValue = Number(trade.date);
+    const closedDate = new Date(Number.isFinite(dateValue) ? dateValue : Date.parse(trade.date));
+    const dateText = Number.isNaN(closedDate.getTime())
+      ? 'Unknown'
+      : closedDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    const netProfit = Number(trade.netProfit) || 0;
+    const netCell = document.createElement('td');
+    netCell.className = `py-2 px-3 text-right font-bold ${netProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+    netCell.textContent = `${netProfit >= 0 ? '+' : '-'}$${formatUSD(Math.abs(netProfit))}`;
+
+    [
+      { value: trade.ticker || '—', className: 'py-2 px-3 font-bold text-white' },
+      { value: dateText, className: 'py-2 px-3 whitespace-nowrap' },
+      { value: `${formatUSD(trade.shares)} shares`, className: 'py-2 px-3 text-right whitespace-nowrap' },
+      { value: `${Math.max(0, Number(trade.holdingDays) || 0)} days`, className: 'py-2 px-3 text-right whitespace-nowrap' },
+      { value: `$${formatUSD(trade.feesAndCommissions)}`, className: 'py-2 px-3 text-right whitespace-nowrap' }
+    ].forEach(cell => {
+      const element = document.createElement('td');
+      element.className = cell.className;
+      element.textContent = cell.value;
+      row.appendChild(element);
+    });
+    row.appendChild(netCell);
+    tableBody.appendChild(row);
+  });
+
+  document.getElementById('closedTradesEmptyState').classList.toggle('hidden', trades.length > 0);
 }
 
 function formatQuoteMetadata(holding) {
@@ -1473,7 +1648,7 @@ async function importBackupJSON(event) {
 }
 
 function runLadderSimulation(data) {
-  const ticker = data.ticker || (state.activeView !== "COMBINED" && state.activeView !== "CASH_CUSHION" ? state.activeView : Object.keys(state.positions)[0]);
+  const ticker = data.ticker || (state.activeView !== "COMBINED" && state.activeView !== "CASH_CUSHION" && state.activeView !== "CLOSED_HISTORY" ? state.activeView : Object.keys(state.positions)[0]);
   const pos = state.positions[ticker];
   if (!pos || pos.shares <= 0) {
     logTerminal(`[Ladder Error]: No active position found for ${ticker}.`);
@@ -1544,7 +1719,7 @@ function runLadderSimulation(data) {
 }
 
 function runComparison(data) {
-  const ticker = data.ticker || (state.activeView !== "COMBINED" && state.activeView !== "CASH_CUSHION" ? state.activeView : Object.keys(state.positions)[0]);
+  const ticker = data.ticker || (state.activeView !== "COMBINED" && state.activeView !== "CASH_CUSHION" && state.activeView !== "CLOSED_HISTORY" ? state.activeView : Object.keys(state.positions)[0]);
   const pos = state.positions[ticker];
   if (!pos || pos.shares <= 0) {
     logTerminal(`[Comparison Error]: No active position found for ${ticker}.`);
@@ -1635,7 +1810,7 @@ function runComparison(data) {
 }
 
 function runSimulation(simPrice, daysOffset, label, tickerTarget) {
-  const ticker = tickerTarget || (state.activeView !== "COMBINED" && state.activeView !== "CASH_CUSHION" ? state.activeView : Object.keys(state.positions)[0]);
+  const ticker = tickerTarget || (state.activeView !== "COMBINED" && state.activeView !== "CASH_CUSHION" && state.activeView !== "CLOSED_HISTORY" ? state.activeView : Object.keys(state.positions)[0]);
   const pos = state.positions[ticker];
   if (!pos || pos.shares <= 0) {
     logTerminal(`[Simulation Error]: No active position open for ${ticker}.`);
@@ -1715,7 +1890,9 @@ async function applyPortfolioActions(action) {
     pos.tranches.push({
       qty: shares,
       price: price,
-      date: action.date || todayDateStr
+      date: action.date || todayDateStr,
+      acquiredAt: resolveTradeDateTimestamp(action.date),
+      buyCommission: buyComm
     });
     pos.commBuy += buyComm;
     pos.currentPrice = price;
@@ -1796,16 +1973,14 @@ async function applyPortfolioActions(action) {
         logTerminal(`[Cash Holding Partial Sell]: Sold ${sharesToSell} ${ticker} @ $${formatUSD(sellPrice)}. Remaining: ${pos.shares} shares.`);
       }
     } else {
-      if (pos.marginCharged) {
-        state.realizedMarginCharged = (state.realizedMarginCharged || 0) + pos.marginCharged;
-      }
+      const realizedTrade = realizeClosedTrade(pos, ticker, sharesToSell, sellPrice, sellComm, Date.now());
+      state.realizedMarginCharged = (state.realizedMarginCharged || 0) + realizedTrade.marginFee;
 
-      if (sharesToSell >= pos.shares) {
+      if (pos.shares <= 1e-8) {
         delete state.positions[ticker];
         state.activeView = "COMBINED";
         logTerminal(`[Position Closed]: Sold ${sharesToSell} ${ticker} @ $${formatUSD(sellPrice)}. Net credited: +$${formatUSD(netCashCredited)} (Debt paid: $${formatUSD(debtRepaid)}, Free Cash added: $${formatUSD(cashSurplus)}). Remaining Debt: -$${formatUSD(Math.abs(state.marginBalance))}. Free Cash: $${formatUSD(state.cashCushion.freeCash)}.`);
       } else {
-        pos.shares -= sharesToSell;
         logTerminal(`[Partial Sell]: Sold ${sharesToSell} ${ticker} @ $${formatUSD(sellPrice)}. Net credited: +$${formatUSD(netCashCredited)} (Debt paid: $${formatUSD(debtRepaid)}, Free Cash added: $${formatUSD(cashSurplus)}). Remaining: ${pos.shares} shares.`);
       }
     }
@@ -1814,7 +1989,7 @@ async function applyPortfolioActions(action) {
     showToast(resultMessage, 'success');
   }
   else if (action.action === "set_pt") {
-    const ticker = (action.ticker ? action.ticker.toUpperCase() : null) || (state.activeView !== "COMBINED" && state.activeView !== "CASH_CUSHION" ? state.activeView : Object.keys(state.positions)[0]);
+    const ticker = (action.ticker ? action.ticker.toUpperCase() : null) || (state.activeView !== "COMBINED" && state.activeView !== "CASH_CUSHION" && state.activeView !== "CLOSED_HISTORY" ? state.activeView : Object.keys(state.positions)[0]);
     if (state.positions[ticker] && Number(action.pt) > 0) {
       state.positions[ticker].pt = Number(action.pt);
       saveState();
@@ -1822,7 +1997,7 @@ async function applyPortfolioActions(action) {
     }
   }
   else if (action.action === "set_price") {
-    const ticker = (action.ticker ? action.ticker.toUpperCase() : null) || (state.activeView !== "COMBINED" && state.activeView !== "CASH_CUSHION" ? state.activeView : Object.keys(state.positions)[0]);
+    const ticker = (action.ticker ? action.ticker.toUpperCase() : null) || (state.activeView !== "COMBINED" && state.activeView !== "CASH_CUSHION" && state.activeView !== "CLOSED_HISTORY" ? state.activeView : Object.keys(state.positions)[0]);
     const newP = Number(action.price);
     
     if (!newP || isNaN(newP) || newP <= 0) {
@@ -2100,7 +2275,7 @@ Classify intent into ONE JSON structure (NO markdown backticks, raw JSON only):
           runSimulation(parsed.simPrice, parsed.daysOffset || 0, parsed.label || "Sim Target", parsed.ticker);
           logTerminal(`[Simulation Evaluated via ${model}]`);
         } else if (parsed.intent === "fetch_quote") {
-          const tickerToFetch = (parsed.ticker && parsed.ticker !== "null") ? parsed.ticker.toUpperCase() : (state.activeView !== "COMBINED" && state.activeView !== "CASH_CUSHION" ? state.activeView : Object.keys(state.positions)[0]);
+          const tickerToFetch = (parsed.ticker && parsed.ticker !== "null") ? parsed.ticker.toUpperCase() : (state.activeView !== "COMBINED" && state.activeView !== "CASH_CUSHION" && state.activeView !== "CLOSED_HISTORY" ? state.activeView : Object.keys(state.positions)[0]);
           if (tickerToFetch) fetchLivePrice(tickerToFetch);
           else logTerminal("[Notice]: No active ticker specified to fetch quote for.");
         } else if (parsed.intent === "action") {
