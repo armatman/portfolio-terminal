@@ -23,6 +23,11 @@ export class GeminiApiError extends Error {
   }
 }
 
+export function shouldTryAnotherGeminiModel(error: unknown): boolean {
+  return error instanceof GeminiApiError &&
+    (error.status === 404 || error.status === 429 || error.status === 503);
+}
+
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 30 * 1000;
@@ -102,6 +107,7 @@ export async function listGeminiModels(
         typeof model === 'object' &&
         model !== null &&
         typeof model.name === 'string' &&
+        !/image/i.test(model.name) &&
         Array.isArray(model.supportedGenerationMethods) &&
         model.supportedGenerationMethods.includes('generateContent')
       )

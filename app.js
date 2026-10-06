@@ -1,5 +1,5 @@
 import { createBlankState, normalizePortfolioState, realizeClosedTrade, resolveTradeDateTimestamp } from './src/domain/portfolio.ts';
-import { generateIntentText, GeminiApiError, listGeminiModels } from './src/features/ai/geminiClient.ts';
+import { generateIntentText, listGeminiModels, shouldTryAnotherGeminiModel } from './src/features/ai/geminiClient.ts';
 import { parseAiIntent } from './src/features/ai/intent.ts';
 import { buildIntentPrompt } from './src/features/ai/prompt.ts';
 
@@ -2134,8 +2134,7 @@ async function executeCommand() {
         break;
       } catch (err) {
         lastError = err;
-        const isModelAvailabilityError = err instanceof GeminiApiError && (err.status === 404 || err.status === 503);
-        if (isModelAvailabilityError) {
+        if (shouldTryAnotherGeminiModel(err)) {
           continue;
         }
         throw err;

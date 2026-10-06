@@ -3,7 +3,8 @@ import {
   clearGeminiModelCache,
   generateIntentText,
   GeminiApiError,
-  listGeminiModels
+  listGeminiModels,
+  shouldTryAnotherGeminiModel
 } from './geminiClient';
 
 describe('Gemini client', () => {
@@ -17,6 +18,7 @@ describe('Gemini client', () => {
         models: [
           { name: 'models/gemini-pro', supportedGenerationMethods: ['generateContent'] },
           { name: 'models/gemini-flash', supportedGenerationMethods: ['generateContent'] },
+          { name: 'models/gemini-2.5-flash-image', supportedGenerationMethods: ['generateContent'] },
           { name: 'models/embedding', supportedGenerationMethods: ['embedContent'] }
         ]
       }), { status: 200 });
@@ -39,6 +41,13 @@ describe('Gemini client', () => {
       new Response(JSON.stringify({ candidates: [{ content: { parts: [] } }] }), { status: 200 });
     await expect(generateIntentText('test-key', 'gemini-flash', 'prompt', malformed))
       .rejects.toThrow('empty response');
+  });
+
+  it('retries other models for quota errors but not permanent request failures', () => {
+    expect(shouldTryAnotherGeminiModel(new GeminiApiError('Quota exceeded', 429))).toBe(true);
+    expect(shouldTryAnotherGeminiModel(new GeminiApiError('Model unavailable', 404))).toBe(true);
+    expect(shouldTryAnotherGeminiModel(new GeminiApiError('Bad request', 400))).toBe(false);
+    expect(shouldTryAnotherGeminiModel(new Error('Quota exceeded'))).toBe(false);
   });
 
   it('times out requests and aborts the underlying fetch', async () => {
