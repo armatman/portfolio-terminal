@@ -121,7 +121,13 @@ function setGistStatus(status, text) {
 async function pushStateToGist(forceImmediate = false) {
   const gistId = extractCleanGistId(localStorage.getItem('github_gist_id'));
   const token = (localStorage.getItem('github_pat_token') || '').trim();
-  if (!gistId || !token) return;
+  if (!gistId || !token) {
+    const missing = [];
+    if (!gistId) missing.push('GIST ID');
+    if (!token) missing.push('TOKEN');
+    setGistStatus('idle', `ADD ${missing.join(' + ')}`);
+    return;
+  }
 
   state.lastUpdated = Date.now();
 
@@ -331,7 +337,13 @@ async function saveApiKeys() {
   localStorage.setItem('github_pat_token', token);
 
   logTerminal("[System]: Credentials saved.");
-  showToast(cleanGistId ? 'Credentials saved and synced.' : 'Credentials saved locally.', 'success');
+  const syncConfigured = Boolean(cleanGistId && token);
+  showToast(
+    syncConfigured
+      ? 'Credentials saved. Checking cloud state...'
+      : 'Saved locally. A Gist ID and GitHub token are required to upload.',
+    syncConfigured ? 'success' : 'warning'
+  );
   if (cleanGistId) {
     await pullCloudAndRewriteLocal();
   }
