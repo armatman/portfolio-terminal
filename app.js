@@ -207,8 +207,11 @@ async function pullCloudAndRewriteLocal() {
 
 async function loadSavedState() {
   loadTradernetRules();
-  const savedKey = localStorage.getItem('gemini_api_key');
-  if (savedKey) document.getElementById('apiKeyInput').value = savedKey;
+  localStorage.removeItem('gemini_api_key');
+  const savedProxyUrl = sessionStorage.getItem('gemini_proxy_url');
+  if (savedProxyUrl) document.getElementById('geminiProxyUrlInput').value = savedProxyUrl;
+  const savedAccessToken = sessionStorage.getItem('gemini_proxy_access_token');
+  if (savedAccessToken) document.getElementById('geminiAccessTokenInput').value = savedAccessToken;
 
   const savedFinnhub = localStorage.getItem('finnhub_api_key');
   if (savedFinnhub) document.getElementById('finnhubKeyInput').value = savedFinnhub;
@@ -242,7 +245,7 @@ async function loadSavedState() {
 let headerCredentialsHidden = false;
 
 function updateHeaderCredentialsVisibility() {
-  const inputIds = ['apiKeyInput', 'finnhubKeyInput', 'gistIdInput', 'githubTokenInput'];
+  const inputIds = ['geminiProxyUrlInput', 'geminiAccessTokenInput', 'finnhubKeyInput', 'gistIdInput', 'githubTokenInput'];
   const inputs = inputIds.map(id => document.getElementById(id));
   const allFieldsFilled = inputs.every(input => input.value.trim().length > 0);
   const fields = document.getElementById('headerCredentialsFields');
@@ -285,8 +288,13 @@ function resetToBlankState() {
 }
 
 async function saveApiKeys() {
-  const gKey = document.getElementById('apiKeyInput').value.trim();
-  localStorage.setItem('gemini_api_key', gKey);
+  const proxyUrl = document.getElementById('geminiProxyUrlInput').value.trim().replace(/\/+$/, '');
+  const accessToken = document.getElementById('geminiAccessTokenInput').value.trim();
+  if (proxyUrl) sessionStorage.setItem('gemini_proxy_url', proxyUrl);
+  else sessionStorage.removeItem('gemini_proxy_url');
+  if (accessToken) sessionStorage.setItem('gemini_proxy_access_token', accessToken);
+  else sessionStorage.removeItem('gemini_proxy_access_token');
+  localStorage.removeItem('gemini_api_key');
 
   const fKey = document.getElementById('finnhubKeyInput').value.trim();
   localStorage.setItem('finnhub_api_key', fKey);
@@ -1968,6 +1976,118 @@ async function applyPortfolioActions(action) {
   renderBoard();
 }
 
+function confirmAiPortfolioAction(action) {
+  let ticker = typeof action.ticker === 'string' ? action.ticker.trim().toUpperCase() : '';
+  if (!ticker && ['set_pt', 'set_price'].includes(action.action)) {
+    ticker = state.positions[state.activeView] ? state.activeView : Object.keys(state.positions)[0] || '';
+  }
+  const validTicker = /^[A-Z0-9._:-]+$/.test(ticker);
+  const isPositiveFinite = value => Number.isFinite(Number(value)) && Number(value) > 0;
+  const isFiniteNumber = value =>
+    value !== null &&
+    value !== undefined &&
+    !(typeof value === 'string' && value.trim() === '') &&
+    Number.isFinite(Number(value));
+  const actionsWithTicker = ['buy', 'sell', 'set_pt', 'set_price', 'add_cash_stock', 'remove_cash_stock'];
+  if (actionsWithTicker.includes(action.action) && !validTicker) {
+    logTerminal('[AI Action Error]: Gemini returned an invalid ticker. No changes were made.');
+    return false;
+  }
+
+  if (action.action === 'buy' && (!isPositiveFinite(action.shares) || !isPositiveFinite(action.price))) {
+    logTerminal('[AI Action Error]: Gemini returned an invalid buy quantity or price. No changes were made.');
+    return false;
+  }
+  if (action.action === 'sell' &&
+      ((action.shares !== null && action.shares !== undefined && !isPositiveFinite(action.shares)) ||
+       !isPositiveFinite(action.price))) {
+    logTerminal('[AI Action Error]: Gemini returned an invalid sale quantity or price. No changes were made.');
+    return false;
+  }
+  if ((action.action === 'set_pt' && !isPositiveFinite(action.pt)) ||
+      (action.action === 'set_price' && !isPositiveFinite(action.price))) {
+    logTerminal('[AI Action Error]: Gemini returned an invalid price. No changes were made.');
+    return false;
+  }
+  if (action.action === 'add_cash_stock' &&
+      (!isPositiveFinite(action.shares) ||
+       (action.price != null && (!Number.isFinite(Number(action.price)) || Number(action.price) < 0)))) {
+    logTerminal('[AI Action Error]: Gemini returned invalid cash holding details. No changes were made.');
+    return false;
+  }
+  if (action.action === 'set_balance' && !isFiniteNumber(action.balance)) {
+    logTerminal('[AI Action Error]: Gemini returned an invalid margin balance. No changes were made.');
+    return false;
+  }
+  if (action.action === 'set_free_cash' && !isFiniteNumber(action.amount)) {
+    logTerminal('[AI Action Error]: Gemini returned an invalid account balance. No changes were made.');
+    return false;
+  }
+
+  const details = {
+    buy: `Buy ${action.shares} ${ticker} at $${action.price}?`,
+    sell: `Sell ${action.shares == null ? 'all' : action.shares} ${ticker} at $${action.price}?`,
+    set_pt: `Set ${ticker}'s target price to $${action.pt}?`,
+    set_price: `Set ${ticker}'s tracked market price to $${action.price}?`,
+    set_balance: `Set margin debt/balance to ${action.balance}?`,
+    set_free_cash: `Set account balance/debt to ${action.amount}?`,
+    add_cash_stock: `Add ${action.shares} shares of ${ticker} to cash holdings?`,
+    remove_cash_stock: `Remove ${ticker} from cash holdings?`
+  };
+  const message = details[action.action];
+  if (!message) {
+    logTerminal(`[AI Action Error]: Unsupported action "${action.action}". No changes were made.`);
+    return false;
+  }
+  return confirm(`Gemini interpreted your input as this portfolio change:\n\n${message}\n\nApply it?`);
+}
+
+async function readGeminiResponse(response, operation) {
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(`Gemini ${operation} returned an unreadable response (HTTP ${response.status}).`);
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error(`Gemini ${operation} returned an invalid response body (HTTP ${response.status}).`);
+  }
+  if (!response.ok || data.error) {
+    const message = data.error?.message || response.statusText || 'Request failed';
+    throw new Error(`Gemini ${operation} failed (HTTP ${response.status}): ${message}`);
+  }
+  return data;
+}
+
+function getGeminiProxyCredentials() {
+  const proxyUrl = (sessionStorage.getItem('gemini_proxy_url') || '').trim().replace(/\/+$/, '');
+  const accessToken = (sessionStorage.getItem('gemini_proxy_access_token') || '').trim();
+  if (!proxyUrl || !accessToken) {
+    throw new Error('Configure your Cloudflare Gemini Worker URL and access token, then click Save.');
+  }
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(proxyUrl);
+  } catch {
+    throw new Error('Gemini Worker URL must be a valid HTTPS URL.');
+  }
+  if (parsedUrl.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(parsedUrl.hostname)) {
+    throw new Error('Gemini Worker URL must use HTTPS.');
+  }
+  return { proxyUrl, accessToken };
+}
+
+async function fetchGeminiProxy(path, accessToken, options = {}) {
+  const { proxyUrl } = getGeminiProxyCredentials();
+  return fetch(`${proxyUrl}/api/${path}`, {
+    ...options,
+    headers: {
+      ...options.headers,
+      Authorization: `Bearer ${accessToken}`
+    }
+  });
+}
+
 async function executeCommand() {
   const input = document.getElementById('cmdInput');
   const text = input.value.trim();
@@ -2006,13 +2126,6 @@ async function executeCommand() {
   const quoteMatch = text.match(/^(?:quote|price of|fetch price|get price)\s+([A-Za-z]+)$/i);
   if (quoteMatch) {
     fetchLivePrice(quoteMatch[1].toUpperCase());
-    return;
-  }
-
-  const apiKey = localStorage.getItem('gemini_api_key');
-  if (!apiKey) {
-    logTerminal("[Error]: Missing API Key. Enter your Google AI Studio key above.");
-    showToast('Missing Gemini API key.', 'error');
     return;
   }
 
@@ -2138,20 +2251,18 @@ Classify intent into ONE JSON structure (NO markdown backticks, raw JSON only):
 `;
 
   try {
-    let activeModels = [];
-    try {
-      const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-      const listData = await listRes.json();
-      if (listData.models) {
-        activeModels = listData.models
-          .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent"))
-          .map(m => m.name.replace(/^models\//, ''));
-      }
-    } catch (listErr) {}
-
-    activeModels.sort((a, b) => (b.includes("flash") ? 1 : 0) - (a.includes("flash") ? 1 : 0));
+    const { accessToken } = getGeminiProxyCredentials();
+    const listResponse = await fetchGeminiProxy('models', accessToken);
+    const listData = await readGeminiResponse(listResponse, 'model discovery');
+    const activeModels = (Array.isArray(listData.models) ? listData.models : [])
+      .filter(model => model.name && model.supportedGenerationMethods?.includes('generateContent'))
+      .map(model => model.name.replace(/^models\//, ''));
+    activeModels.sort((a, b) => {
+      const flashPreference = Number(b.includes('flash')) - Number(a.includes('flash'));
+      return flashPreference || a.localeCompare(b);
+    });
     if (activeModels.length === 0) {
-      activeModels = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"];
+      throw new Error('Gemini returned no models available for generateContent for this key.');
     }
 
     document.getElementById('aiStatus').innerText = "PARSING...";
@@ -2160,33 +2271,43 @@ Classify intent into ONE JSON structure (NO markdown backticks, raw JSON only):
 
     for (const model of activeModels) {
       try {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+        const response = await fetchGeminiProxy(`generate?model=${encodeURIComponent(model)}`, accessToken, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { 
+            generationConfig: {
               temperature: 0.0,
               responseMimeType: "application/json"
             }
           })
         });
-
-        const data = await response.json();
-        if (data.error) {
-          if (data.error.code === 503 || data.error.code === 404 || data.error.code === 400) {
-            lastError = new Error(`${data.error.message} (${model})`);
-            continue;
+        const data = await readGeminiResponse(response, `generateContent with ${model}`);
+        const candidate = data.candidates?.[0];
+        if (!candidate?.content?.parts) {
+          if (candidate?.finishReason === 'SAFETY') {
+            throw new Error(`Gemini blocked the response for safety reasons (${model}).`);
           }
-          throw new Error(`${data.error.message} (Code ${data.error.code})`);
+          throw new Error(`Gemini returned no usable candidate (${model}).`);
+        }
+        const rawText = candidate.content.parts
+          .map(part => part.text)
+          .filter(text => typeof text === 'string')
+          .join('')
+          .trim();
+        if (!rawText) {
+          throw new Error(`Gemini returned an empty response (${model}).`);
         }
 
-        if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) {
-          throw new Error("No candidate returned by Gemini API.");
+        let parsed;
+        try {
+          parsed = JSON.parse(rawText);
+        } catch {
+          throw new Error(`Gemini returned invalid JSON (${model}).`);
         }
-
-        const rawText = data.candidates[0].content.parts[0].text.trim();
-        const parsed = JSON.parse(rawText);
+        if (!parsed || typeof parsed !== 'object' || typeof parsed.intent !== 'string') {
+          throw new Error(`Gemini response is missing a valid intent (${model}).`);
+        }
 
         if (parsed.intent === "ladder") {
           runLadderSimulation(parsed);
@@ -2202,9 +2323,13 @@ Classify intent into ONE JSON structure (NO markdown backticks, raw JSON only):
           if (tickerToFetch) fetchLivePrice(tickerToFetch);
           else logTerminal("[Notice]: No active ticker specified to fetch quote for.");
         } else if (parsed.intent === "action") {
-          await applyPortfolioActions(parsed);
+          if (confirmAiPortfolioAction(parsed)) await applyPortfolioActions(parsed);
+          else logTerminal('[AI Action]: Cancelled. No portfolio changes were made.');
         } else if (parsed.intent === "chat") {
+          if (typeof parsed.response !== 'string') throw new Error(`Gemini chat response is invalid (${model}).`);
           logTerminal(`[AI Advisor]: ${parsed.response}`);
+        } else {
+          throw new Error(`Gemini returned unsupported intent "${parsed.intent}" (${model}).`);
         }
 
         document.getElementById('aiStatus').innerText = "READY";
@@ -2213,13 +2338,16 @@ Classify intent into ONE JSON structure (NO markdown backticks, raw JSON only):
         break;
       } catch (err) {
         lastError = err;
+        const isModelAvailabilityError = err.message.includes('HTTP 404') || err.message.includes('HTTP 503');
+        if (isModelAvailabilityError) {
+          continue;
+        }
+        throw err;
       }
     }
 
     if (!success) {
-      logTerminal(`[Error]: ${lastError ? lastError.message : 'All model endpoints busy. Retry in 15s.'}`);
-      document.getElementById('aiStatus').innerText = "ERROR";
-      document.getElementById('aiStatus').className = "text-rose-400 text-[10px]";
+      throw lastError || new Error('No available Gemini model could process the request.');
     }
   } catch (err) {
     logTerminal(`[Error]: ${err.message}`);
@@ -2231,7 +2359,7 @@ Classify intent into ONE JSON structure (NO markdown backticks, raw JSON only):
 window.onload = async () => {
   await loadSavedState();
   headerCredentialsHidden = localStorage.getItem('header_credentials_hidden') === 'true';
-  ['apiKeyInput', 'finnhubKeyInput', 'gistIdInput', 'githubTokenInput'].forEach(id => {
+  ['geminiProxyUrlInput', 'geminiAccessTokenInput', 'finnhubKeyInput', 'gistIdInput', 'githubTokenInput'].forEach(id => {
     document.getElementById(id).addEventListener('input', updateHeaderCredentialsVisibility);
   });
   const quoteRefreshInterval = document.getElementById('quoteRefreshInterval');
