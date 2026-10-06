@@ -253,7 +253,9 @@ async function restoreProviderKeysFromGistFile(file) {
     throw new Error('Encrypted provider-keys file is not valid JSON.');
   }
 
-  let geminiKey = sessionStorage.getItem('gemini_api_key') || '';
+  let geminiKey = sessionStorage.getItem('gemini_api_key') ||
+    localStorage.getItem('gemini_gist_unlock_key') ||
+    '';
   if (!geminiKey) {
     geminiKey = window.prompt('Encrypted provider keys were found in this Gist. Enter the Gemini API key to unlock them:')?.trim() || '';
     if (!geminiKey) {
@@ -265,6 +267,7 @@ async function restoreProviderKeysFromGistFile(file) {
   try {
     const keys = await decryptProviderKeys(envelope, geminiKey);
     sessionStorage.setItem('gemini_api_key', geminiKey);
+    localStorage.setItem('gemini_gist_unlock_key', geminiKey);
     const geminiInput = document.getElementById('apiKeyInput');
     if (geminiInput) geminiInput.value = geminiKey;
     applyProviderKeys(keys);

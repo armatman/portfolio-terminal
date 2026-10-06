@@ -100,11 +100,11 @@ Quote and insight data is cached briefly to limit repeat calls. Use the relevant
 
 ### Gemini key
 
-Create a personal API key through Google AI Studio, enter it in the **Gemini** field, and click **Save**. The key is kept in browser **session storage** and cleared when that browser session ends. Gemini model availability can vary by API key, region, and Google's current catalog.
+Create a personal API key through Google AI Studio, enter it in the **Gemini** field, and click **Save**. The key is kept in browser **session storage** for Gemini requests. If you enter it when prompted to unlock encrypted provider keys from a Gist, a copy is saved in this browser's **local storage** after successful decryption so this device will not prompt again. Gemini model availability can vary by API key, region, and Google's current catalog.
 
 ### Data-provider keys
 
-Finnhub, Twelve Data, Alpha Vantage, and RapidAPI keys are stored in this browser's **local storage**. When Gist sync is configured, clicking **Save** also stores those provider keys in a separate AES-GCM encrypted Gist file, with a key derived from the Gemini API key. The Gemini key itself is never uploaded; on a browser session without a saved Gemini key, the app prompts for it to unlock the bundle and then saves the recovered provider keys locally.
+Finnhub, Twelve Data, Alpha Vantage, and RapidAPI keys are stored in this browser's **local storage**. When Gist sync is configured, clicking **Save** also stores those provider keys in a separate AES-GCM encrypted Gist file, with a key derived from the Gemini API key. The Gemini key itself is never uploaded; when no saved unlock key is available in this browser, the app prompts for it to unlock the bundle and then saves the recovered provider keys locally.
 
 ## Optional GitHub Gist sync
 
