@@ -2,6 +2,15 @@ import { createBlankState, normalizePortfolioState, realizeClosedTrade, resolveT
 import { generateIntentText, listGeminiModels, shouldTryAnotherGeminiModel } from './src/features/ai/geminiClient.ts';
 import { parseAiIntent } from './src/features/ai/intent.ts';
 import { buildIntentPrompt } from './src/features/ai/prompt.ts';
+import { parseFinnhubQuoteDetails } from './src/features/quotes/finnhubQuote.ts';
+import { fetchFinnhubInsight } from './src/features/quotes/finnhubInsights.ts';
+import {
+  fetchAlphaVantageAnalysts,
+  fetchAlphaVantageEarnings,
+  fetchAlphaVantageNews,
+  fetchAlphaVantageOverview,
+  fetchAlphaVantageQuote
+} from './src/features/quotes/alphaVantageAnalysts.ts';
 
 // ==========================================
 // USER-CONFIGURABLE BROKER DEFAULT ASSUMPTIONS
@@ -35,6 +44,11 @@ let quoteRefreshTimer = null;
 let isRefreshingLivePrices = false;
 let lastRenderedDeskView = null;
 const livePriceRequests = new Map();
+let marketInsightsOpen = false;
+let activeInsightSection = 'news';
+let loadedInsightTicker = '';
+let insightRequestId = 0;
+let insightTicker = '';
 
 const QUOTE_REFRESH_INTERVAL_KEY = 'quote_refresh_interval_ms';
 const DEFAULT_QUOTE_REFRESH_INTERVAL_MS = 60 * 1000;
@@ -217,6 +231,9 @@ async function loadSavedState() {
   const savedFinnhub = localStorage.getItem('finnhub_api_key');
   if (savedFinnhub) document.getElementById('finnhubKeyInput').value = savedFinnhub;
 
+  const savedAlphaVantage = localStorage.getItem('alpha_vantage_api_key');
+  if (savedAlphaVantage) document.getElementById('alphaVantageKeyInput').value = savedAlphaVantage;
+
   const savedGistId = localStorage.getItem('github_gist_id');
   if (savedGistId) document.getElementById('gistIdInput').value = savedGistId;
 
@@ -246,9 +263,10 @@ async function loadSavedState() {
 let headerCredentialsHidden = false;
 
 function updateHeaderCredentialsVisibility() {
-  const inputIds = ['apiKeyInput', 'finnhubKeyInput', 'gistIdInput', 'githubTokenInput'];
+  const inputIds = ['apiKeyInput', 'finnhubKeyInput', 'alphaVantageKeyInput', 'gistIdInput', 'githubTokenInput'];
   const inputs = inputIds.map(id => document.getElementById(id));
-  const allFieldsFilled = inputs.every(input => input.value.trim().length > 0);
+  const allFieldsFilled = ['apiKeyInput', 'finnhubKeyInput', 'gistIdInput', 'githubTokenInput']
+    .every(id => document.getElementById(id).value.trim().length > 0);
   const fields = document.getElementById('headerCredentialsFields');
   const toggleButton = document.getElementById('toggleHeaderCredentialsButton');
   const saveButton = document.getElementById('saveApiKeysButton');
@@ -297,6 +315,10 @@ async function saveApiKeys() {
   const fKey = document.getElementById('finnhubKeyInput').value.trim();
   localStorage.setItem('finnhub_api_key', fKey);
 
+  const alphaVantageKey = document.getElementById('alphaVantageKeyInput').value.trim();
+  if (alphaVantageKey) localStorage.setItem('alpha_vantage_api_key', alphaVantageKey);
+  else localStorage.removeItem('alpha_vantage_api_key');
+
   const rawGist = document.getElementById('gistIdInput').value.trim();
   const cleanGistId = extractCleanGistId(rawGist);
   localStorage.setItem('github_gist_id', cleanGistId);
@@ -306,15 +328,11 @@ async function saveApiKeys() {
 
   logTerminal("[System]: Credentials saved.");
   const syncConfigured = Boolean(cleanGistId && token);
-  showToast(
-    syncConfigured
-      ? 'Credentials saved. Checking cloud state...'
-      : 'Gemini key saved for this session. Gist sync is not configured.',
-    syncConfigured ? 'success' : 'warning'
-  );
+  showToast(syncConfigured ? 'Credentials saved. Checking cloud state...' : 'Provider keys saved in this browser. Gist sync is not configured.', syncConfigured ? 'success' : 'warning');
   if (cleanGistId) {
     await pullCloudAndRewriteLocal();
   }
+  if (marketInsightsOpen) await loadMarketInsight(activeInsightSection, true);
 }
 
 function calcCommission(shares, totalVal) {
@@ -449,6 +467,7 @@ function setQuoteSymbolMapping(ticker, mapping) {
   trackedItems.forEach(item => {
     item.quoteSource = 'Symbol mapping changed; refresh quote';
     delete item.quoteUpdatedAt;
+    delete item.quoteDetails;
   });
   saveState();
   return normalizedMapping;
@@ -827,6 +846,42 @@ function renderBoard() {
   }
 
   updateCombinedBreakeven();
+  syncMarketInsightsPanel();
+}
+
+function getMarketInsightsTicker() {
+  if (state.positions[state.activeView]) return state.activeView;
+  if (state.activeView === 'COMBINED') return Object.keys(state.positions)[0] || '';
+  return '';
+}
+
+function syncMarketInsightsPanel() {
+  const ticker = getMarketInsightsTicker();
+  const toggle = document.getElementById('marketInsightsToggle');
+  const panel = document.getElementById('marketInsightsPanel');
+  toggle.classList.toggle('hidden', !ticker);
+  panel.classList.toggle('hidden', !marketInsightsOpen || !ticker);
+  toggle.setAttribute('aria-expanded', String(marketInsightsOpen && Boolean(ticker)));
+  toggle.textContent = marketInsightsOpen ? 'Hide insights' : 'Market insights';
+  if (!ticker) {
+    marketInsightsOpen = false;
+    loadedInsightTicker = '';
+    return;
+  }
+  document.getElementById('marketInsightsTicker').textContent = `· ${ticker}`;
+  if (marketInsightsOpen && loadedInsightTicker !== ticker) {
+    loadedInsightTicker = ticker;
+    loadMarketInsight(activeInsightSection);
+  }
+}
+
+function toggleMarketInsights() {
+  const ticker = getMarketInsightsTicker();
+  if (!ticker) return;
+  const tickerWasLoaded = loadedInsightTicker === ticker;
+  marketInsightsOpen = !marketInsightsOpen;
+  syncMarketInsightsPanel();
+  if (marketInsightsOpen && tickerWasLoaded) loadMarketInsight(activeInsightSection);
 }
 
 function playEntryAnimation(element, animationClass) {
@@ -883,7 +938,10 @@ function renderCashCushionPanel() {
     const quoteLabel = document.createElement('span');
     quoteLabel.className = 'mt-0.5 block text-[9px] font-normal text-slate-500';
     quoteLabel.textContent = quoteMeta;
-    priceCell.append(priceLabel, quoteLabel);
+    priceCell.append(priceLabel);
+    const dailyQuoteLabel = createDailyQuoteLabel(h.quoteDetails);
+    if (dailyQuoteLabel) priceCell.append(dailyQuoteLabel);
+    priceCell.append(quoteLabel);
     tr.appendChild(priceCell);
     addCell(`$${formatUSD(val)}`, 'py-2 px-3 text-right text-white font-semibold');
     addCell(`${allocation.toFixed(1)}%`, 'py-2 px-3 text-right text-slate-300 tabular-nums');
@@ -969,13 +1027,497 @@ function formatQuoteMetadata(holding) {
   return `${isStale ? 'Stale · ' : ''}${holding.quoteSource || 'Quote'} · ${time}`;
 }
 
-function recordTrackedPrice(ticker, price, sourceName, updatedAt = null) {
+function createDailyQuoteLabel(details) {
+  if (!details || typeof details !== 'object') return null;
+  const hasChange = Number.isFinite(details.change) && Number.isFinite(details.changePercent);
+  const hasRange = Number.isFinite(details.high) && Number.isFinite(details.low);
+  if (!hasChange && !hasRange) return null;
+
+  const label = document.createElement('span');
+  label.className = 'mt-0.5 block text-[9px] font-normal tabular-nums';
+  const parts = [];
+  if (hasChange) {
+    const sign = details.change >= 0 ? '+' : '−';
+    parts.push(`${sign}$${formatUSD(Math.abs(details.change))} (${sign}${Math.abs(details.changePercent).toFixed(2)}%)`);
+    label.classList.add(details.change >= 0 ? 'text-emerald-400' : 'text-rose-400');
+  } else {
+    label.classList.add('text-slate-400');
+  }
+  if (hasRange) parts.push(`H $${formatUSD(details.high)} / L $${formatUSD(details.low)}`);
+  label.textContent = `Day: ${parts.join(' · ')}`;
+  return label;
+}
+
+function createInsightElement(tagName, className = '', text = '') {
+  const element = document.createElement(tagName);
+  if (className) element.className = className;
+  if (text) element.textContent = text;
+  return element;
+}
+
+function renderInsightNotice(message, isError = false) {
+  const content = document.getElementById('marketInsightsContent');
+  const notice = createInsightElement(
+    'p',
+    isError ? 'text-amber-200' : 'text-slate-400',
+    message
+  );
+  if (!isError) {
+    content.replaceChildren(notice);
+    return;
+  }
+  const retry = createInsightElement('button', 'mt-3 rounded border border-amber-800/70 bg-amber-950/30 px-2.5 py-1.5 text-[10px] font-bold text-amber-200 transition hover:bg-amber-900/50', 'Try again');
+  retry.type = 'button';
+  retry.addEventListener('click', refreshMarketInsight);
+  const errorPanel = createInsightElement('div', 'rounded-md border border-amber-900/50 bg-amber-950/10 p-3');
+  errorPanel.append(notice, retry);
+  content.replaceChildren(errorPanel);
+}
+
+function setMarketInsightsStatus(text, tone = 'idle') {
+  const status = document.getElementById('marketInsightsStatus');
+  const tones = {
+    idle: 'border-slate-700 bg-slate-900 text-slate-400',
+    loading: 'border-cyan-800 bg-cyan-950/50 text-cyan-200',
+    success: 'border-emerald-800 bg-emerald-950/40 text-emerald-300',
+    warning: 'border-amber-800 bg-amber-950/40 text-amber-200',
+    error: 'border-rose-800 bg-rose-950/40 text-rose-300'
+  };
+  status.className = `rounded-full border px-2 py-0.5 text-[9px] font-semibold ${tones[tone] || tones.idle}`;
+  status.textContent = text;
+}
+
+function formatInsightDate(value, options = { day: 'numeric', month: 'short', year: 'numeric' }) {
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Date unavailable' : date.toLocaleDateString(undefined, options);
+}
+
+function isFiniteQuoteValue(value) {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function renderMarketInsightNews(data) {
+  const content = document.getElementById('marketInsightsContent');
+  const articles = Array.isArray(data?.articles) ? data.articles
+    : Array.isArray(data) ? data : [];
+  const validArticles = articles
+    .filter(article => article && typeof article === 'object' && typeof article.headline === 'string' && typeof article.url === 'string').slice(0, 8);
+  if (validArticles.length === 0) {
+    renderInsightNotice('No recent company news was returned for this symbol.');
+    return;
+  }
+
+  const list = createInsightElement('div', 'divide-y divide-slate-800/80');
+  if (data?.source) list.appendChild(createInsightElement('p', 'pb-2 text-[10px] text-cyan-300', `Source · ${data.source}`));
+  validArticles.forEach(article => {
+    const item = createInsightElement('article', 'py-3 first:pt-0 last:pb-0');
+    const meta = createInsightElement('div', 'mb-1 flex flex-wrap gap-x-2 text-[10px] text-slate-500');
+    meta.append(
+      createInsightElement('span', '', article.source || 'News'),
+      createInsightElement('span', '', Number(article.datetime) > 0 ? formatInsightDate(Number(article.datetime) * 1000) : 'Date unavailable')
+    );
+    const link = createInsightElement('a', 'font-semibold text-slate-100 hover:text-cyan-300');
+    link.textContent = article.headline;
+    try {
+      const url = new URL(article.url);
+      if (url.protocol === 'https:' || url.protocol === 'http:') {
+        link.href = url.href;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+      }
+    } catch {
+      link.removeAttribute('href');
+    }
+    item.append(meta, link);
+    if (typeof article.summary === 'string' && article.summary.trim()) {
+      item.append(createInsightElement('p', 'mt-1 line-clamp-3 text-[11px] leading-relaxed text-slate-400', article.summary));
+    }
+    list.appendChild(item);
+  });
+  content.replaceChildren(list);
+}
+
+function appendInsightMetric(container, label, value) {
+  const card = createInsightElement('div', 'rounded border border-slate-800 bg-slate-900/60 p-2.5');
+  card.append(
+    createInsightElement('div', 'text-[9px] uppercase tracking-wider text-slate-500', label),
+    createInsightElement('div', 'mt-1 font-mono text-sm font-semibold text-slate-100', value)
+  );
+  container.appendChild(card);
+}
+
+function renderMarketInsightFundamentals(result) {
+  const content = document.getElementById('marketInsightsContent');
+  const overview = result?.overview && typeof result.overview === 'object' ? result.overview : null;
+  const profile = overview
+    ? {
+        name: overview.Name,
+        finnhubIndustry: overview.Industry || overview.Sector,
+        exchange: overview.Exchange,
+        country: overview.Country,
+        weburl: overview.OfficialSite,
+        marketCapitalization: Number(overview.MarketCapitalization) / 1_000_000
+      }
+    : result?.profile && typeof result.profile === 'object' ? result.profile : {};
+  const metric = result?.metric && typeof result.metric === 'object' ? result.metric : {};
+  const metrics = overview
+    ? {
+        marketCapitalization: profile.marketCapitalization,
+        peBasicExclExtraTTM: Number(overview.PERatio),
+        epsBasicExclExtraItemsTTM: Number(overview.EPS),
+        '52WeekHigh': Number(overview['52WeekHigh']),
+        '52WeekLow': Number(overview['52WeekLow']),
+        dividendYieldIndicatedAnnual: Number(overview.DividendYield) * 100
+      }
+    : metric.metric && typeof metric.metric === 'object' ? metric.metric : {};
+  const hasProfile = typeof profile.name === 'string' && profile.name.trim();
+  const hasMetrics = Object.keys(metrics).length > 0;
+  if (!hasProfile && !hasMetrics) {
+    renderInsightNotice('No company profile or fundamental metrics were returned.');
+    return;
+  }
+
+  const root = createInsightElement('div', 'space-y-3');
+  if (result?.source) root.appendChild(createInsightElement('p', 'text-[10px] text-cyan-300', `Source · ${result.source}`));
+  if (hasProfile) {
+    const profileRow = createInsightElement('div', 'flex flex-wrap items-start justify-between gap-2 border-b border-slate-800 pb-3');
+    const company = createInsightElement('div');
+    company.append(
+      createInsightElement('h3', 'font-bold text-white', profile.name),
+      createInsightElement('p', 'mt-1 text-[10px] text-slate-400', [profile.finnhubIndustry, profile.exchange, profile.country].filter(value => typeof value === 'string' && value).join(' · ') || 'Company profile')
+    );
+    profileRow.appendChild(company);
+    if (typeof profile.weburl === 'string') {
+      try {
+        const url = new URL(profile.weburl);
+        if (url.protocol === 'https:' || url.protocol === 'http:') {
+          const website = createInsightElement('a', 'text-[10px] text-cyan-300 hover:text-cyan-200', 'Company website');
+          website.href = url.href;
+          website.target = '_blank';
+          website.rel = 'noopener noreferrer';
+          profileRow.appendChild(website);
+        }
+      } catch {
+        // Ignore malformed optional profile URLs.
+      }
+    }
+    root.appendChild(profileRow);
+  }
+
+  const formatMetricValue = value => typeof value === 'number' && Number.isFinite(value) ? value : null;
+  const definitions = [
+    ['Market cap', 'marketCapitalization', value => `$${formatUSD(value)}M`],
+    ['P/E · TTM', 'peBasicExclExtraTTM', value => value.toFixed(2)],
+    ['EPS · TTM', 'epsBasicExclExtraItemsTTM', value => `$${formatUSD(value)}`],
+    ['52-week high', '52WeekHigh', value => `$${formatUSD(value)}`],
+    ['52-week low', '52WeekLow', value => `$${formatUSD(value)}`],
+    ['Dividend yield', 'dividendYieldIndicatedAnnual', value => `${value.toFixed(2)}%`]
+  ];
+  const grid = createInsightElement('div', 'grid grid-cols-2 gap-2 sm:grid-cols-3');
+  let count = 0;
+  definitions.forEach(([label, key, formatter]) => {
+    let value = formatMetricValue(metrics[key]);
+    if (value === null && key === 'marketCapitalization') value = formatMetricValue(profile.marketCapitalization);
+    if (value === null) return;
+    appendInsightMetric(grid, label, formatter(value));
+    count += 1;
+  });
+  if (count > 0) root.appendChild(grid);
+  content.replaceChildren(root);
+}
+
+function renderMarketInsightEarnings(data) {
+  const content = document.getElementById('marketInsightsContent');
+  const isHistorical = data?.source === 'Alpha Vantage';
+  const events = Array.isArray(data?.earningsCalendar) ? data.earningsCalendar
+    : isHistorical && Array.isArray(data?.quarterlyEarnings)
+      ? data.quarterlyEarnings.map(event => ({
+          date: event.fiscalDateEnding,
+          hour: 'reported',
+          epsEstimate: Number(event.estimatedEPS),
+          epsActual: Number(event.reportedEPS),
+          surprisePercentage: Number(event.surprisePercentage)
+        }))
+      : [];
+  const sorted = events
+    .filter(event => event && typeof event === 'object' && typeof event.date === 'string')
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, 10);
+  if (sorted.length === 0) {
+    renderInsightNotice('No earnings events were returned for the selected date range.');
+    return;
+  }
+  const list = createInsightElement('div', 'divide-y divide-slate-800/80');
+  list.appendChild(createInsightElement(
+    'p',
+    'pb-2 text-[10px] text-cyan-300',
+    isHistorical ? 'Source · Alpha Vantage · reported quarterly history (not a forward calendar)' : 'Upcoming and recent earnings calendar'
+  ));
+  sorted.forEach(event => {
+    const row = createInsightElement('div', 'grid grid-cols-2 gap-2 py-2 first:pt-0');
+    const dateLabel = createInsightElement('div', 'font-semibold text-slate-100', formatInsightDate(event.date));
+    const timing = event.hour === 'bmo' ? 'Before market' : event.hour === 'amc' ? 'After market' : event.hour === 'reported' ? 'Reported' : event.hour || 'Time unavailable';
+    const details = createInsightElement('div', 'text-right text-[10px] text-slate-400', `${event.symbol || insightTicker} · ${timing}`);
+    row.append(dateLabel, details);
+    const values = [];
+    if (isFiniteQuoteValue(event.epsEstimate)) values.push(`EPS est. ${Number(event.epsEstimate).toFixed(2)}`);
+    if (isFiniteQuoteValue(event.epsActual)) values.push(`actual ${Number(event.epsActual).toFixed(2)}`);
+    if (Number.isFinite(event.surprisePercentage)) values.push(`surprise ${Number(event.surprisePercentage).toFixed(2)}%`);
+    if (values.length > 0) row.appendChild(createInsightElement('div', 'col-span-2 text-[10px] text-slate-500', values.join(' · ')));
+    list.appendChild(row);
+  });
+  content.replaceChildren(list);
+}
+
+function renderMarketInsightAnalysts(result) {
+  const content = document.getElementById('marketInsightsContent');
+  const recommendations = Array.isArray(result?.recommendations) ? result.recommendations : [];
+  const latest = recommendations
+    .filter(item => item && typeof item === 'object' && typeof item.period === 'string')
+    .sort((a, b) => b.period.localeCompare(a.period))[0];
+  const alphaRatings = result?.ratingCounts && typeof result.ratingCounts === 'object'
+    ? result.ratingCounts
+    : null;
+  const ratingData = latest || alphaRatings;
+  const targets = result?.targets && typeof result.targets === 'object' ? result.targets : {};
+  const targetPrice = isFiniteQuoteValue(result?.targetPrice) ? result.targetPrice : null;
+  const hasTargets = targetPrice !== null || ['targetHigh', 'targetMean', 'targetMedian', 'targetLow']
+    .some(key => isFiniteQuoteValue(targets[key]));
+  if (!ratingData && !hasTargets) {
+    renderInsightNotice('No analyst recommendations or price targets were returned.');
+    return;
+  }
+
+  const root = createInsightElement('div', 'space-y-3');
+  if (typeof result?.source === 'string') root.appendChild(createInsightElement('p', 'text-[10px] text-cyan-300', `Source · ${result.source}`));
+  if (ratingData) {
+    const period = latest?.period;
+    root.appendChild(createInsightElement('p', 'text-[10px] text-slate-500', `Recommendation counts${period ? ` · ${formatInsightDate(period)}` : ''}`));
+    const grid = createInsightElement('div', 'grid grid-cols-2 gap-2 sm:grid-cols-5');
+    [
+      ['Strong buy', ratingData.strongBuy],
+      ['Buy', ratingData.buy],
+      ['Hold', ratingData.hold],
+      ['Sell', ratingData.sell],
+      ['Strong sell', ratingData.strongSell]
+    ].forEach(([label, value]) => {
+      if (isFiniteQuoteValue(value)) appendInsightMetric(grid, label, String(value));
+    });
+    root.appendChild(grid);
+  }
+  if (hasTargets) {
+    root.appendChild(createInsightElement('p', 'pt-1 text-[10px] text-slate-500', `Analyst price target${targets.lastUpdated ? ` · Updated ${formatInsightDate(targets.lastUpdated)}` : ''}`));
+    const grid = createInsightElement('div', `grid grid-cols-2 gap-2 ${targetPrice !== null ? 'sm:grid-cols-1' : 'sm:grid-cols-4'}`);
+    if (targetPrice !== null) appendInsightMetric(grid, 'Consensus target', `$${formatUSD(targetPrice)}`);
+    else {
+      [
+        ['Low', 'targetLow'],
+        ['Median', 'targetMedian'],
+        ['Mean', 'targetMean'],
+        ['High', 'targetHigh']
+      ].forEach(([label, key]) => {
+        if (isFiniteQuoteValue(targets[key])) appendInsightMetric(grid, label, `$${formatUSD(targets[key])}`);
+      });
+    }
+    root.appendChild(grid);
+  }
+  content.replaceChildren(root);
+}
+
+function renderMarketInsightAccessError(section, error, ticker) {
+  const content = document.getElementById('marketInsightsContent');
+  const root = createInsightElement('div', 'space-y-2');
+  root.appendChild(createInsightElement(
+    'p',
+    'font-semibold text-amber-300',
+    error instanceof Error ? error.message : String(error)
+  ));
+  if (error?.status === 403 && section === 'analysts') {
+    const trackedTarget = state.positions[ticker]?.pt;
+    root.appendChild(createInsightElement(
+      'p',
+      'text-slate-400',
+      Number.isFinite(trackedTarget)
+        ? `Analyst consensus is not available from this Finnhub plan. Your tracked target is $${formatUSD(trackedTarget)}; this is your portfolio target, not an analyst estimate.`
+        : 'Analyst recommendations and price targets are restricted for this Finnhub key. They are not included in your own portfolio target.'
+    ));
+  } else {
+    root.appendChild(createInsightElement(
+      'p',
+      'text-slate-500',
+      'Endpoint access varies by Finnhub plan and exchange. Check your account entitlements or try again after updating your key.'
+    ));
+  }
+  content.replaceChildren(root);
+}
+
+function hasMarketInsightData(section, result) {
+  if (section === 'news') {
+    const articles = Array.isArray(result) ? result : result?.articles;
+    return Array.isArray(articles) && articles.length > 0;
+  }
+  if (section === 'fundamentals') {
+    return Boolean(result?.overview?.Name || result?.profile?.name ||
+      Object.keys(result?.metric?.metric || {}).length > 0);
+  }
+  if (section === 'earnings') {
+    return Boolean(result?.earningsCalendar?.length || result?.quarterlyEarnings?.length);
+  }
+  return Boolean(
+    result?.targetPrice ||
+    result?.targets?.targetHigh ||
+    result?.targets?.targetMean ||
+    result?.targets?.targetMedian ||
+    result?.targets?.targetLow ||
+    result?.recommendations?.length ||
+    result?.ratingCounts
+  );
+}
+
+async function fetchAlphaVantageInsight(section, apiKey, ticker, force) {
+  if (section === 'news') {
+    const articles = await fetchAlphaVantageNews(apiKey, ticker, { force });
+    return { source: 'Alpha Vantage', articles };
+  }
+  if (section === 'fundamentals') {
+    const overview = await fetchAlphaVantageOverview(apiKey, ticker, { force });
+    return { source: 'Alpha Vantage', overview };
+  }
+  if (section === 'earnings') {
+    return {
+      source: 'Alpha Vantage',
+      ...(await fetchAlphaVantageEarnings(apiKey, ticker, { force }))
+    };
+  }
+  return fetchAlphaVantageAnalysts(apiKey, ticker, { force });
+}
+
+async function loadMarketInsight(section, force = false) {
+  const sections = new Set(['news', 'fundamentals', 'earnings', 'analysts']);
+  if (!sections.has(section)) return;
+  activeInsightSection = section;
+  const ticker = getMarketInsightsTicker();
+  const content = document.getElementById('marketInsightsContent');
+  if (!ticker) {
+    renderInsightNotice('Select a margin position to load its market insights.');
+    return;
+  }
+  insightTicker = ticker;
+  document.getElementById('marketInsightsTicker').textContent = `· ${ticker}`;
+  document.querySelectorAll('[data-insight]').forEach(button => {
+    const selected = button.dataset.insight === section;
+    button.className = `insight-tab whitespace-nowrap rounded px-3 py-1.5 text-[10px] font-bold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400 ${selected ? 'bg-cyan-400 text-slate-950 shadow-sm shadow-cyan-950' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'}`;
+    button.setAttribute('aria-selected', String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  });
+  document.getElementById('marketInsightsContent').setAttribute(
+    'aria-labelledby',
+    document.querySelector(`[data-insight="${section}"]`)?.id || 'insightTabNews'
+  );
+
+  const finnhubKey = localStorage.getItem('finnhub_api_key') || '';
+  const alphaVantageKey = localStorage.getItem('alpha_vantage_api_key') || '';
+  if (!finnhubKey && !alphaVantageKey) {
+    setMarketInsightsStatus('Needs API key', 'warning');
+    renderInsightNotice('Add a Finnhub or Alpha Vantage API key in the header credentials to load company insights.', true);
+    return;
+  }
+
+  const requestId = ++insightRequestId;
+  const refreshButton = document.getElementById('marketInsightsRefresh');
+  refreshButton.disabled = true;
+  content.setAttribute('aria-busy', 'true');
+  setMarketInsightsStatus(`Loading ${section}…`, 'loading');
+  content.replaceChildren(createInsightElement('p', 'animate-pulse text-cyan-300', `Loading ${section} for ${ticker}…`));
+  const now = new Date();
+  const to = now.toISOString().slice(0, 10);
+  const fromDate = new Date(now);
+  let request;
+  try {
+    if (!finnhubKey) {
+      throw new Error('Finnhub key is not configured.');
+    } else if (section === 'news') {
+      fromDate.setDate(fromDate.getDate() - 30);
+      request = fetchFinnhubInsight(finnhubKey, 'company-news', {
+        symbol: ticker,
+        from: fromDate.toISOString().slice(0, 10),
+        to
+      }, { force });
+    } else if (section === 'fundamentals') {
+      request = Promise.all([
+        fetchFinnhubInsight(finnhubKey, 'stock/profile2', { symbol: ticker }, { force }),
+        fetchFinnhubInsight(finnhubKey, 'stock/metric', { symbol: ticker, metric: 'all' }, { force })
+      ]).then(([profile, metric]) => ({ profile, metric }));
+    } else if (section === 'earnings') {
+      fromDate.setDate(fromDate.getDate() - 30);
+      const toDate = new Date(now);
+      toDate.setDate(toDate.getDate() + 90);
+      request = fetchFinnhubInsight(finnhubKey, 'calendar/earnings', {
+        symbol: ticker,
+        from: fromDate.toISOString().slice(0, 10),
+        to: toDate.toISOString().slice(0, 10)
+      }, { force });
+    } else {
+      request = Promise.all([
+        fetchFinnhubInsight(finnhubKey, 'stock/recommendation', { symbol: ticker }, { force }),
+        fetchFinnhubInsight(finnhubKey, 'stock/price-target', { symbol: ticker }, { force })
+      ]).then(([recommendations, targets]) => ({ recommendations, targets }));
+    }
+    try {
+      let result = await request;
+      if (!hasMarketInsightData(section, result)) {
+        throw new Error(`Finnhub returned no ${section} data for ${ticker}.`);
+      }
+      if (requestId !== insightRequestId || ticker !== getMarketInsightsTicker()) return;
+      if (section === 'news') renderMarketInsightNews(result);
+      else if (section === 'fundamentals') renderMarketInsightFundamentals(result);
+      else if (section === 'earnings') renderMarketInsightEarnings(result);
+      else renderMarketInsightAnalysts(result);
+      setMarketInsightsStatus(`Finnhub · updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'success');
+    } catch (error) {
+      if (!alphaVantageKey) throw error;
+      try {
+        const result = await fetchAlphaVantageInsight(section, alphaVantageKey, ticker, force);
+        if (!hasMarketInsightData(section, result)) {
+          throw new Error(`Alpha Vantage returned no ${section} data for ${ticker}.`);
+        }
+        if (requestId !== insightRequestId || ticker !== getMarketInsightsTicker()) return;
+        if (section === 'news') renderMarketInsightNews(result);
+        else if (section === 'fundamentals') renderMarketInsightFundamentals(result);
+        else if (section === 'earnings') renderMarketInsightEarnings(result);
+        else renderMarketInsightAnalysts(result);
+        setMarketInsightsStatus(`Alpha Vantage · updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'success');
+      } catch (fallbackError) {
+        throw new Error(
+          `Finnhub failed: ${error instanceof Error ? error.message : String(error)}. Alpha Vantage fallback failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}.`
+        );
+      }
+    }
+  } catch (error) {
+    if (requestId !== insightRequestId) return;
+    setMarketInsightsStatus('Could not load data', 'error');
+    renderMarketInsightAccessError(section, error, ticker);
+  } finally {
+    if (requestId === insightRequestId) {
+      refreshButton.disabled = false;
+      content.setAttribute('aria-busy', 'false');
+    }
+  }
+}
+
+function refreshMarketInsight() {
+  return loadMarketInsight(activeInsightSection, true);
+}
+
+function recordTrackedPrice(ticker, price, sourceName, updatedAt = null, quoteDetails = null) {
   const symbol = ticker.toUpperCase();
   let matched = false;
   const updateQuoteMetadata = holding => {
     holding.quoteSource = sourceName;
     if (updatedAt === null) delete holding.quoteUpdatedAt;
     else holding.quoteUpdatedAt = updatedAt;
+    if (quoteDetails) holding.quoteDetails = quoteDetails;
+    else delete holding.quoteDetails;
   };
 
   if (state.positions[symbol]) {
@@ -1188,6 +1730,10 @@ function renderSingleAssetView(pos) {
   
   const unSign = unrealized >= 0 ? '+' : '';
   document.getElementById('boardPrice').innerHTML = `$${formatUSD(pos.currentPrice)} | $${formatUSD(currentMktVal)} – <span class="${unrealized >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${unSign}$${formatUSD(unrealized)} (${unSign}${unrealizedPct.toFixed(2)}%)</span>`;
+  const boardDailyQuote = document.getElementById('boardDailyQuote');
+  const dailyQuoteLabel = createDailyQuoteLabel(pos.quoteDetails);
+  boardDailyQuote.textContent = dailyQuoteLabel?.textContent || '';
+  boardDailyQuote.className = dailyQuoteLabel?.className || 'block text-[10px] text-slate-500';
   
   const isFullDebt = Math.abs(allocatedDebt - totalAccountDebt) < 0.01;
   document.getElementById('boardMargin').innerText = isFullDebt
@@ -1366,7 +1912,7 @@ async function requestLivePrice(symbol) {
   const request = fetchLivePriceFromProviders(symbol).then(result => ({
     ...result,
     matched: result.price !== null
-      ? recordTrackedPrice(symbol, result.price, result.sourceName, result.updatedAt)
+      ? recordTrackedPrice(symbol, result.price, result.sourceName, result.updatedAt, result.quoteDetails)
       : false
   }));
   livePriceRequests.set(symbol, request);
@@ -1381,12 +1927,14 @@ async function fetchLivePriceFromProviders(symbol) {
   symbol = symbol.toUpperCase();
   let price = null;
   let sourceName = "";
+  let quoteDetails = null;
   const providerErrors = [];
   const configuredSymbols = state.quoteSymbols?.[symbol] || {};
   const finnhubSymbol = configuredSymbols.finnhub || symbol;
   const stooqSymbol = configuredSymbols.stooq || `${symbol.toLowerCase()}.us`;
 
   const finnhubKey = localStorage.getItem('finnhub_api_key');
+  const alphaVantageKey = localStorage.getItem('alpha_vantage_api_key') || '';
 
   if (finnhubKey) {
     try {
@@ -1396,6 +1944,7 @@ async function fetchLivePriceFromProviders(symbol) {
         if (data && data.c && Number(data.c) > 0) {
           price = Number(data.c);
           sourceName = `Finnhub Live · ${finnhubSymbol}`;
+          quoteDetails = parseFinnhubQuoteDetails(data);
         } else {
           providerErrors.push("Finnhub returned no valid quote");
         }
@@ -1404,6 +1953,22 @@ async function fetchLivePriceFromProviders(symbol) {
       }
     } catch (error) {
       providerErrors.push(`Finnhub: ${error.message}`);
+    }
+  }
+
+  if (!price && alphaVantageKey) {
+    try {
+      const quote = await fetchAlphaVantageQuote(alphaVantageKey, symbol);
+      price = quote.price;
+      sourceName = `Alpha Vantage · ${symbol}`;
+      quoteDetails = parseFinnhubQuoteDetails({
+        d: quote.change,
+        dp: quote.changePercent,
+        h: quote.high,
+        l: quote.low
+      });
+    } catch (error) {
+      providerErrors.push(`Alpha Vantage: ${error.message}`);
     }
   }
 
@@ -1446,6 +2011,7 @@ async function fetchLivePriceFromProviders(symbol) {
     price,
     sourceName,
     updatedAt,
+    quoteDetails,
     error: price ? null : (providerErrors.length ? providerErrors.join("; ") : "No quote provider is configured")
   };
 }
@@ -1806,6 +2372,7 @@ async function applyPortfolioActions(action) {
     pos.currentPrice = price;
     pos.quoteSource = 'Trade input';
     delete pos.quoteUpdatedAt;
+    delete pos.quoteDetails;
     if (action.pt) pos.pt = Number(action.pt);
 
     // 1. Consume Free Cash first
@@ -2154,7 +2721,7 @@ async function executeCommand() {
 window.onload = async () => {
   await loadSavedState();
   headerCredentialsHidden = localStorage.getItem('header_credentials_hidden') === 'true';
-  ['apiKeyInput', 'finnhubKeyInput', 'gistIdInput', 'githubTokenInput'].forEach(id => {
+  ['apiKeyInput', 'finnhubKeyInput', 'alphaVantageKeyInput', 'gistIdInput', 'githubTokenInput'].forEach(id => {
     document.getElementById(id).addEventListener('input', updateHeaderCredentialsVisibility);
   });
   const quoteRefreshInterval = document.getElementById('quoteRefreshInterval');
@@ -2182,10 +2749,13 @@ Object.assign(window, {
   executeCommand,
   exportBackupJSON,
   importBackupJSON,
+  loadMarketInsight,
   pullCloudAndRewriteLocal,
   refreshAllLivePrices,
+  refreshMarketInsight,
   resetToBlankState,
   saveApiKeys,
   saveCurrentBalanceFromInput,
+  toggleMarketInsights,
   toggleHeaderCredentialsVisibility
 });

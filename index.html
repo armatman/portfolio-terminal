@@ -111,6 +111,13 @@
                    class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-cyan-500 w-24 text-slate-200">
           </div>
 
+          <div class="flex flex-col gap-1 min-w-[130px]">
+            <label for="alphaVantageKeyInput" class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Alpha Vantage</label>
+            <input id="alphaVantageKeyInput" type="password" placeholder="API key" autocomplete="off"
+                   title="Optional market-data fallback. Stored in this browser and sent directly to Alpha Vantage."
+                   class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-cyan-500 w-32 text-slate-200">
+          </div>
+
           <div class="flex flex-col gap-1 min-w-[150px]">
             <label class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Gist</label>
             <input id="gistIdInput" type="text" placeholder="ID or URL" 
@@ -196,13 +203,19 @@
           </div>
         </div>
 
-        <div class="text-2xl font-black text-white" id="boardTitle">COMBINED PORTFOLIO</div>
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="text-2xl font-black text-white" id="boardTitle">COMBINED PORTFOLIO</div>
+          <button id="marketInsightsToggle" type="button" onclick="toggleMarketInsights()" class="hidden rounded border border-cyan-800/70 bg-cyan-950/30 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 transition hover:bg-cyan-900/50">
+            Market insights
+          </button>
+        </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-300">
           <div><span class="text-slate-500">Tranches / Holdings:</span> <span id="boardTranches" class="text-white font-medium">None</span></div>
           <div><span class="text-slate-500">Total Invested | Avg:</span> <span id="boardInvested" class="text-white font-medium">$0.00 | $0.00</span></div>
           <div>
             <span class="text-slate-500">Share Price | Mkt Value:</span> <span id="boardPrice" class="text-emerald-400 font-medium">$0.00 | $0.00 – +$0.00 (+0.00%)</span>
+            <span id="boardDailyQuote" class="block text-[10px] text-slate-500"></span>
             <span id="boardQuoteMeta" class="ml-2 text-[10px] text-slate-500"></span>
           </div>
           <div><span class="text-slate-500">Margin Debt:</span> <span id="boardMargin" class="text-rose-400 font-medium">-$0.00</span></div>
@@ -223,6 +236,30 @@
             </div>
           </div>
         </div>
+
+        <section id="marketInsightsPanel" class="hidden space-y-4 rounded-lg border border-cyan-900/50 bg-gradient-to-br from-slate-900/80 to-slate-950/90 p-4 shadow-lg shadow-black/10" aria-label="Market insights">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <h2 class="text-sm font-black uppercase tracking-wider text-slate-100">Market insights <span id="marketInsightsTicker" class="text-cyan-300"></span></h2>
+                <span id="marketInsightsStatus" class="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[9px] font-semibold text-slate-400" role="status">Ready when you are</span>
+              </div>
+              <p class="mt-1 text-[10px] text-slate-500">Company news, fundamentals, earnings, and analyst consensus. Providers are tried in order: Finnhub, then Alpha Vantage.</p>
+            </div>
+            <button id="marketInsightsRefresh" type="button" onclick="refreshMarketInsight()" class="inline-flex shrink-0 items-center gap-1.5 rounded border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-[10px] font-bold text-slate-300 transition hover:border-cyan-800 hover:bg-slate-800 hover:text-cyan-200 disabled:cursor-wait disabled:opacity-50" aria-label="Refresh current market insight">
+              <span aria-hidden="true">↻</span> Refresh
+            </button>
+          </div>
+          <div id="marketInsightsTabs" class="flex gap-1.5 overflow-x-auto border-b border-slate-800 pb-2" role="tablist" aria-label="Market insight categories">
+            <button type="button" id="insightTabNews" data-insight="news" onclick="loadMarketInsight('news')" class="insight-tab whitespace-nowrap rounded px-3 py-1.5 text-[10px] font-bold transition" role="tab" aria-controls="marketInsightsContent" aria-selected="false" tabindex="-1">News</button>
+            <button type="button" id="insightTabFundamentals" data-insight="fundamentals" onclick="loadMarketInsight('fundamentals')" class="insight-tab whitespace-nowrap rounded px-3 py-1.5 text-[10px] font-bold transition" role="tab" aria-controls="marketInsightsContent" aria-selected="false" tabindex="-1">Fundamentals</button>
+            <button type="button" id="insightTabEarnings" data-insight="earnings" onclick="loadMarketInsight('earnings')" class="insight-tab whitespace-nowrap rounded px-3 py-1.5 text-[10px] font-bold transition" role="tab" aria-controls="marketInsightsContent" aria-selected="false" tabindex="-1">Earnings</button>
+            <button type="button" id="insightTabAnalysts" data-insight="analysts" onclick="loadMarketInsight('analysts')" class="insight-tab whitespace-nowrap rounded px-3 py-1.5 text-[10px] font-bold transition" role="tab" aria-controls="marketInsightsContent" aria-selected="false" tabindex="-1">Analysts</button>
+          </div>
+          <div id="marketInsightsContent" class="min-h-24 rounded-lg border border-slate-800/80 bg-slate-950/70 p-3 text-xs text-slate-300" role="tabpanel" aria-labelledby="insightTabNews" aria-live="polite" aria-busy="false">
+            <p class="text-slate-400">Choose a category to load insights for this holding. Results are cached briefly to reduce provider requests.</p>
+          </div>
+        </section>
 
         <!-- Projection Table -->
         <div class="overflow-x-auto pt-2" id="projectionTableContainer">
