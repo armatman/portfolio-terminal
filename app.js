@@ -1937,8 +1937,27 @@ async function applyPortfolioActions(action) {
       return;
     }
 
-    const sharesToSell = action.shares ? Math.min(pos.shares, Number(action.shares)) : pos.shares;
+    const availableShares = Number(pos.shares);
+    if (!Number.isFinite(availableShares) || availableShares <= 0) {
+      logTerminal(`[Error]: Position ${ticker} has no valid shares to sell.`);
+      return;
+    }
+
+    const hasRequestedShares = action.shares !== null && action.shares !== undefined;
+    const requestedShares = hasRequestedShares ? Number(action.shares) : availableShares;
+    if (!Number.isFinite(requestedShares) || requestedShares <= 0) {
+      logTerminal(`[Sell Error]: Enter a positive share quantity, or omit the quantity to sell all ${ticker} shares.`);
+      showToast('Sell quantity must be greater than zero.', 'error');
+      return;
+    }
+    const sharesToSell = Math.min(availableShares, requestedShares);
+
     const sellPrice = Number(action.price);
+    if (!Number.isFinite(sellPrice) || sellPrice <= 0) {
+      logTerminal(`[Sell Error]: Enter a valid sale price greater than zero for ${ticker}.`);
+      showToast('Sale price must be greater than zero.', 'error');
+      return;
+    }
     const grossProceeds = sharesToSell * sellPrice;
     const sellComm = calcCommission(sharesToSell, grossProceeds);
     const netCashCredited = grossProceeds - sellComm;
