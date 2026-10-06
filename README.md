@@ -104,7 +104,7 @@ Create a personal API key through Google AI Studio, enter it in the **Gemini** f
 
 ### Data-provider keys
 
-Finnhub, Twelve Data, Alpha Vantage, and RapidAPI keys are stored in this browser's **local storage** until removed or browser data is cleared. They are not included in portfolio backups or Gist synchronization.
+Finnhub, Twelve Data, Alpha Vantage, and RapidAPI keys are stored in this browser's **local storage**. When Gist sync is configured, clicking **Save** also stores those provider keys in a separate AES-GCM encrypted Gist file, with a key derived from the Gemini API key. The Gemini key itself is never uploaded; on a browser session without a saved Gemini key, the app prompts for it to unlock the bundle and then saves the recovered provider keys locally.
 
 ## Optional GitHub Gist sync
 
@@ -117,6 +117,8 @@ Gist sync is optional; local browser storage works without it. To enable sync:
 
 When a Gist ID is configured, startup attempts to pull remote state; if the Gist can be read, its portfolio replaces local state. Saving portfolio changes schedules an upload to the configured Gist. The status badge indicates whether a pull or push succeeded. A failed sync does not mean the local portfolio was saved to the cloud.
 
+**Encrypted provider keys:** The Gemini key derives an AES-256-GCM encryption key using PBKDF2-SHA-256. Only the encrypted provider-key bundle is uploaded. The Gemini key and GitHub personal access token are not part of that file. Access to a private Gist still requires its Gist ID and GitHub token in that browser; the app cannot fetch a private Gist using only the Gemini key. If the Gemini key is incorrect, the encrypted credentials are not applied.
+
 **Protect your data:** export a backup before connecting a Gist that may contain existing data or before pressing **Pull**. Importing a backup replaces the local portfolio and, when Gist sync is configured, also attempts to replace its remote copy. **Reset** clears portfolio holdings, balances, and history locally and attempts to reset the synchronized state as well.
 
 ## Backups and local data
@@ -124,7 +126,7 @@ When a Gist ID is configured, startup attempts to pull remote state; if the Gist
 - **Export** downloads the current portfolio state as a JSON file. Store backups somewhere safe; they may contain sensitive financial information.
 - **Import** checks that the file looks like a portfolio backup and asks before replacing current state.
 - Portfolio state, broker assumptions, quote-symbol mappings, and some interface preferences are stored in this browser's local storage.
-- API credentials are separate from portfolio state. Gemini uses session storage; data-provider and Gist credentials use local storage.
+- API credentials are separate from portfolio state and portfolio backups. Gemini uses session storage; data-provider and Gist credentials use local storage. Provider keys are also present in the Gist only as an encrypted separate file when configured.
 - Clearing site data or using a different browser/device removes access to local state unless you have an export or have synchronized through Gist.
 
 Credential fields are visually masked, but masking is not encryption. Browser storage can be inspected by the person using the browser, and provider keys are sent to their respective services. Do not embed shared or production secrets in this public static app. Use personal keys with appropriate restrictions and quotas.

@@ -14,6 +14,10 @@ import {
 } from './src/features/quotes/alphaVantageAnalysts.ts';
 import { fetchTwelveDataQuote } from './src/features/quotes/twelveData.ts';
 import {
+  decryptProviderKeys,
+  encryptProviderKeys
+} from './src/features/credentials/encryptedProviderKeys.ts';
+import {
   fetchRapidApiYahooAnalystTarget,
   fetchRapidApiYahooQuote
 } from './src/features/quotes/rapidApiYahoo.ts';
@@ -47,6 +51,7 @@ const DEFAULT_TRADERNET_RULES = {
 const TRADERNET_RULES = { ...DEFAULT_TRADERNET_RULES };
 const TRADERNET_RULES_STORAGE_KEY = 'tradernet_rules_v1';
 const GIST_FILE_NAME = "margin_state.json";
+const GIST_CREDENTIALS_FILE_NAME = "provider_keys.enc.json";
 
 function formatUSD(val) {
   const num = Number(val) || 0;
@@ -178,6 +183,98 @@ async function pushStateToGist(forceImmediate = false) {
   }
 }
 
+function getProviderKeysFromStorage() {
+  return {
+    finnhub: localStorage.getItem('finnhub_api_key') || '',
+    alphaVantage: localStorage.getItem('alpha_vantage_api_key') || '',
+    twelveData: localStorage.getItem('twelve_data_api_key') || '',
+    rapidApiYahoo: localStorage.getItem('rapidapi_yahoo_key') || ''
+  };
+}
+
+function applyProviderKeys(keys) {
+  const storageKeys = {
+    finnhub: 'finnhub_api_key',
+    alphaVantage: 'alpha_vantage_api_key',
+    twelveData: 'twelve_data_api_key',
+    rapidApiYahoo: 'rapidapi_yahoo_key'
+  };
+  const inputIds = {
+    finnhub: 'finnhubKeyInput',
+    alphaVantage: 'alphaVantageKeyInput',
+    twelveData: 'twelveDataKeyInput',
+    rapidApiYahoo: 'rapidApiKeyInput'
+  };
+  Object.entries(storageKeys).forEach(([keyName, storageKey]) => {
+    const value = keys[keyName] || '';
+    if (value) localStorage.setItem(storageKey, value);
+    else localStorage.removeItem(storageKey);
+    const input = document.getElementById(inputIds[keyName]);
+    if (input) input.value = value;
+  });
+}
+
+async function saveProviderKeysToGist(keys, geminiKey) {
+  const gistId = extractCleanGistId(localStorage.getItem('github_gist_id'));
+  const token = (localStorage.getItem('github_pat_token') || '').trim();
+  if (!gistId || !token) return false;
+  if (!geminiKey.trim()) {
+    throw new Error('Enter the Gemini key to encrypt provider keys for Gist storage.');
+  }
+  const envelope = await encryptProviderKeys(keys, geminiKey);
+  const response = await fetch(`https://api.github.com/gists/${gistId}`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `token ${token}`,
+      Accept: 'application/vnd.github+json',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      files: {
+        [GIST_CREDENTIALS_FILE_NAME]: {
+          content: JSON.stringify(envelope, null, 2)
+        }
+      }
+    })
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(`Could not save encrypted provider keys to Gist (HTTP ${response.status}: ${error.message || 'Gist update rejected'}).`);
+  }
+  return true;
+}
+
+async function restoreProviderKeysFromGistFile(file) {
+  if (!file?.content) return;
+  let envelope;
+  try {
+    envelope = JSON.parse(file.content);
+  } catch {
+    throw new Error('Encrypted provider-keys file is not valid JSON.');
+  }
+
+  let geminiKey = sessionStorage.getItem('gemini_api_key') || '';
+  if (!geminiKey) {
+    geminiKey = window.prompt('Encrypted provider keys were found in this Gist. Enter the Gemini API key to unlock them:')?.trim() || '';
+    if (!geminiKey) {
+      logTerminal('[Gist Keys]: Restore skipped because the Gemini unlock key was not provided.');
+      return;
+    }
+  }
+
+  try {
+    const keys = await decryptProviderKeys(envelope, geminiKey);
+    sessionStorage.setItem('gemini_api_key', geminiKey);
+    const geminiInput = document.getElementById('apiKeyInput');
+    if (geminiInput) geminiInput.value = geminiKey;
+    applyProviderKeys(keys);
+    logTerminal('[Gist Keys]: Encrypted provider keys unlocked and saved in this browser.');
+  } catch (error) {
+    logTerminal(`[Gist Keys Error]: ${error instanceof Error ? error.message : String(error)}`);
+    showToast('Could not unlock provider keys. Check the Gemini key.', 'error');
+  }
+}
+
 async function pullStateFromGistOnLoad() {
   const gistId = extractCleanGistId(localStorage.getItem('github_gist_id'));
   const token = (localStorage.getItem('github_pat_token') || '').trim();
@@ -195,8 +292,13 @@ async function pullStateFromGistOnLoad() {
     }
 
     const data = await res.json();
-    const targetFile = data.files && (data.files[GIST_FILE_NAME] || Object.values(data.files)[0]);
+    const files = data.files || {};
+    const targetFile = files[GIST_FILE_NAME] ||
+      Object.entries(files).find(([name]) => name !== GIST_CREDENTIALS_FILE_NAME)?.[1];
     if (!targetFile || !targetFile.content) throw new Error("Gist contains no readable file.");
+    if (files[GIST_CREDENTIALS_FILE_NAME]) {
+      await restoreProviderKeysFromGistFile(files[GIST_CREDENTIALS_FILE_NAME]);
+    }
 
     let remoteState = null;
     let parsedEnvelope = null;
@@ -367,9 +469,26 @@ async function saveApiKeys() {
   const token = document.getElementById('githubTokenInput').value.trim();
   localStorage.setItem('github_pat_token', token);
 
+  let encryptedKeysSynced = false;
+  if (cleanGistId && token) {
+    try {
+      encryptedKeysSynced = await saveProviderKeysToGist(getProviderKeysFromStorage(), geminiKey);
+      if (encryptedKeysSynced) logTerminal('[Gist Keys]: Provider keys encrypted and saved to the Gist.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logTerminal(`[Gist Keys Error]: ${message}`);
+      showToast(`Provider keys saved locally, but cloud encryption failed: ${message}`, 'error');
+    }
+  }
+
   logTerminal("[System]: Credentials saved.");
   const syncConfigured = Boolean(cleanGistId && token);
-  showToast(syncConfigured ? 'Credentials saved. Checking cloud state...' : 'Provider keys saved in this browser. Gist sync is not configured.', syncConfigured ? 'success' : 'warning');
+  const toastMessage = syncConfigured
+    ? encryptedKeysSynced
+      ? 'Credentials saved securely. Checking cloud state...'
+      : 'Credentials saved locally. Add a Gemini key to encrypt provider keys in the Gist.'
+    : 'Provider keys saved in this browser. Gist sync is not configured.';
+  showToast(toastMessage, syncConfigured && encryptedKeysSynced ? 'success' : 'warning');
   if (cleanGistId) {
     await pullCloudAndRewriteLocal();
   }
