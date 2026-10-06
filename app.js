@@ -1176,67 +1176,6 @@ function getAnalystTargetPrice(result) {
   return values.find(value => typeof value === 'number' && Number.isFinite(value) && value > 0);
 }
 
-async function testRapidApiYahooTarget() {
-  const ticker = getMarketInsightsTicker();
-  const keyInput = document.getElementById('rapidApiKeyInput');
-  const apiKey = keyInput.value.trim();
-  const container = document.getElementById('boardAnalystConsensus');
-  if (!ticker) {
-    showToast('Select a margin position before testing Yahoo Finance.', 'warning');
-    return;
-  }
-  if (!apiKey) {
-    if (container) {
-      container.textContent = 'RapidAPI key required · enter it above and test again';
-      container.title = 'A RapidAPI key is required for the apidojo Yahoo Finance API.';
-      container.className = 'rounded border border-amber-800 bg-amber-950/30 px-2.5 py-1 text-[10px] font-semibold text-amber-300';
-    }
-    return;
-  }
-
-  localStorage.setItem('rapidapi_yahoo_key', apiKey);
-  if (container) {
-    container.textContent = `Testing Yahoo Finance via RapidAPI · ${ticker}…`;
-    container.removeAttribute('title');
-    container.className = 'rounded border border-slate-700 bg-slate-900 px-2.5 py-1 text-[10px] font-semibold text-slate-400';
-  }
-
-  try {
-    const result = await fetchRapidApiYahooAnalystTarget(apiKey, ticker);
-    if (localStorage.getItem('rapidapi_yahoo_key') !== apiKey) return;
-    const credentials = [
-      localStorage.getItem('finnhub_api_key') || '',
-      localStorage.getItem('alpha_vantage_api_key') || '',
-      apiKey
-    ].join('|');
-    boardAnalystSnapshots.set(ticker, { ...result, credentials, fetchedAt: Date.now() });
-    boardAnalystErrors.delete(ticker);
-    renderBoardAnalystConsensus(ticker);
-    showToast(`${ticker} Yahoo analyst target loaded from RapidAPI.`, 'success');
-  } catch (error) {
-    if (localStorage.getItem('rapidapi_yahoo_key') !== apiKey) return;
-    const message = error instanceof Error ? error.message : String(error);
-    const credentials = [
-      localStorage.getItem('finnhub_api_key') || '',
-      localStorage.getItem('alpha_vantage_api_key') || '',
-      apiKey
-    ].join('|');
-    boardAnalystErrors.set(ticker, {
-      credentials,
-      failedAt: Date.now(),
-      message,
-      summary: `RapidAPI Yahoo Finance: ${message}`
-    });
-    if (container) {
-      container.textContent = `RapidAPI request failed · ${message}`;
-      container.title = message;
-      container.className = 'max-w-xl rounded border border-amber-800 bg-amber-950/30 px-2.5 py-1 text-[10px] font-semibold text-amber-300';
-    }
-    logTerminal(`[RapidAPI Yahoo Finance]: ${ticker} target request failed: ${message}`);
-    showToast('RapidAPI Yahoo target request failed; see the board message and terminal.', 'error');
-  }
-}
-
 async function fetchBoardAnalystTarget(ticker) {
   const finnhubKey = localStorage.getItem('finnhub_api_key') || '';
   const alphaVantageKey = localStorage.getItem('alpha_vantage_api_key') || '';
@@ -3372,7 +3311,6 @@ Object.assign(window, {
   resetToBlankState,
   saveApiKeys,
   saveCurrentBalanceFromInput,
-  testRapidApiYahooTarget,
   toggleMarketInsights,
   toggleHeaderCredentialsVisibility
 });
