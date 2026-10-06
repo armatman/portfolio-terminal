@@ -167,6 +167,20 @@ export function normalizePortfolioBackup(candidate: unknown, now = Date.now()): 
   return normalizePortfolioState(candidate, now);
 }
 
+export function resolveSaleQuantity(availableShares: number, requestedShares: number | null): number {
+  if (!Number.isFinite(availableShares) || availableShares <= 0) {
+    throw new Error('Position has no valid shares to sell.');
+  }
+  if (requestedShares === null) return availableShares;
+  if (!Number.isFinite(requestedShares) || requestedShares <= 0) {
+    throw new Error('Sell quantity must be greater than zero.');
+  }
+  if (requestedShares - availableShares > 1e-8) {
+    throw new Error(`Cannot sell ${requestedShares} shares; only ${availableShares} are available.`);
+  }
+  return Math.min(availableShares, requestedShares);
+}
+
 function resolveTrancheAcquiredAt(tranche: TradeTranche, fallbackDate: string | undefined, now: number): number {
   const acquiredAt = Number(tranche.acquiredAt);
   if (Number.isFinite(acquiredAt) && acquiredAt > 0) return acquiredAt;

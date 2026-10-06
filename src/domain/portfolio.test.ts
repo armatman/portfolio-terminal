@@ -4,6 +4,7 @@ import {
   normalizePortfolioBackup,
   normalizePortfolioState,
   realizeClosedTrade,
+  resolveSaleQuantity,
   resolveTradeDateTimestamp,
   type MarginPosition
 } from './portfolio';
@@ -46,6 +47,14 @@ describe('portfolio domain', () => {
   it('accepts recognized portfolio backups and rejects unrelated JSON objects', () => {
     expect(normalizePortfolioBackup({ positions: {} }, 10_000).positions).toEqual({});
     expect(() => normalizePortfolioBackup({ settings: {} }, 10_000)).toThrow('recognized portfolio backup');
+  });
+
+  it('prevents selling more shares than the position holds', () => {
+    expect(resolveSaleQuantity(10, null)).toBe(10);
+    expect(resolveSaleQuantity(10, 4)).toBe(4);
+    expect(resolveSaleQuantity(10, 10 + 1e-9)).toBe(10);
+    expect(() => resolveSaleQuantity(10, 11)).toThrow('only 10 are available');
+    expect(() => resolveSaleQuantity(0, 1)).toThrow('no valid shares');
   });
 
   it('parses short buy dates and falls back for invalid dates', () => {

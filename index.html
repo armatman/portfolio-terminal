@@ -99,35 +99,42 @@
           <div id="headerCredentialsFields" class="flex flex-wrap items-end gap-2">
           <div class="flex flex-col gap-1 min-w-[120px]">
             <label for="apiKeyInput" class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Gemini</label>
-            <input id="apiKeyInput" type="text" placeholder="Studio Key" autocomplete="off"
+            <input id="apiKeyInput" type="password" placeholder="Studio Key" autocomplete="new-password"
                    title="Kept for this browser session. It is sent directly from this browser to Google."
                    class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-emerald-500 w-32 text-slate-200">
           </div>
 
           <div class="flex flex-col gap-1 min-w-[96px]">
             <label class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Finnhub</label>
-            <input id="finnhubKeyInput" type="text" placeholder="Key" 
+            <input id="finnhubKeyInput" type="password" placeholder="Key" autocomplete="new-password"
                    title="Free key from finnhub.io for direct real-time quotes"
                    class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-cyan-500 w-24 text-slate-200">
           </div>
 
           <div class="flex flex-col gap-1 min-w-[130px]">
             <label for="alphaVantageKeyInput" class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Alpha Vantage</label>
-            <input id="alphaVantageKeyInput" type="text" placeholder="API key" autocomplete="off"
+            <input id="alphaVantageKeyInput" type="password" placeholder="API key" autocomplete="new-password"
                    title="Optional market-data fallback. Stored in this browser and sent directly to Alpha Vantage."
+                   class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-cyan-500 w-32 text-slate-200">
+          </div>
+
+          <div class="flex flex-col gap-1 min-w-[130px]">
+            <label for="twelveDataKeyInput" class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Twelve Data</label>
+            <input id="twelveDataKeyInput" type="password" placeholder="API key" autocomplete="new-password"
+                   title="Optional quote fallback. Stored in this browser and sent directly to Twelve Data."
                    class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-cyan-500 w-32 text-slate-200">
           </div>
 
           <div class="flex flex-col gap-1 min-w-[150px]">
             <label class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Gist</label>
-            <input id="gistIdInput" type="text" placeholder="ID or URL" 
+            <input id="gistIdInput" type="password" placeholder="ID or URL" autocomplete="new-password"
                    title="Paste your Secret Gist ID (e.g. 3f8b92c4a1b2c3d4e5f6...)"
                    class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-purple-500 w-36 text-slate-200">
           </div>
 
           <div class="flex flex-col gap-1 min-w-[170px]">
             <label class="text-[10px] uppercase tracking-[0.18em] text-slate-500">GitHub</label>
-            <input id="githubTokenInput" type="text" placeholder="Token" 
+            <input id="githubTokenInput" type="password" placeholder="Token" autocomplete="new-password"
                    title="GitHub Personal Access Token with 'gist' scope"
                    class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-purple-500 w-36 text-slate-200">
           </div>
@@ -166,7 +173,7 @@
             Export
           </button>
           
-          <label class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-purple-300 text-xs font-bold px-3 py-2 rounded transition cursor-pointer" title="Import JSON file & overwrite Gist immediately">
+          <label class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-purple-300 text-xs font-bold px-3 py-2 rounded transition cursor-pointer" title="Validate and confirm a portfolio backup import; cloud sync depends on Gist configuration">
             Import
             <input type="file" id="importFileInput" class="hidden" accept=".json" onchange="importBackupJSON(event)">
           </label>
@@ -248,7 +255,7 @@
                 <h2 class="text-sm font-black uppercase tracking-wider text-slate-100">Market insights <span id="marketInsightsTicker" class="text-cyan-300"></span></h2>
                 <span id="marketInsightsStatus" class="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[9px] font-semibold text-slate-400" role="status">Ready when you are</span>
               </div>
-              <p class="mt-1 text-[10px] text-slate-500">Company news, fundamentals, earnings, and analyst consensus. Providers are tried in order: Finnhub, then Alpha Vantage.</p>
+              <p class="mt-1 text-[10px] text-slate-500">Company news, fundamentals, earnings, and analyst consensus. Finnhub and Alpha Vantage are tried as available.</p>
             </div>
             <button id="marketInsightsRefresh" type="button" onclick="refreshMarketInsight()" class="inline-flex shrink-0 items-center gap-1.5 rounded border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-[10px] font-bold text-slate-300 transition hover:border-cyan-800 hover:bg-slate-800 hover:text-cyan-200 disabled:cursor-wait disabled:opacity-50" aria-label="Refresh current market insight">
               <span aria-hidden="true">↻</span> Refresh
@@ -411,7 +418,7 @@
       </div>
       
       <div id="terminalLog" class="h-64 overflow-y-auto bg-slate-950 p-3 rounded text-xs space-y-2 border border-slate-800/80">
-        <div class="text-slate-500">[System]: Ready. GitHub Gist cloud synchronization active.</div>
+        <div class="text-slate-500">[System]: Portfolio ready. Check the Gist status indicator for cloud sync.</div>
       </div>
 
       <div class="flex gap-2">

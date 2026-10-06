@@ -1,4 +1,5 @@
-import { createBlankState, normalizePortfolioBackup, normalizePortfolioState, realizeClosedTrade, resolveTradeDateTimestamp } from './src/domain/portfolio.ts';
+import { createBlankState, normalizePortfolioBackup, normalizePortfolioState, realizeClosedTrade, resolveSaleQuantity, resolveTradeDateTimestamp } from './src/domain/portfolio.ts';
+import { getUsEquityProjectionDates } from './src/domain/tradingCalendar.ts';
 import { generateIntentText, GeminiApiError, listGeminiModels, shouldTryAnotherGeminiModel } from './src/features/ai/geminiClient.ts';
 import { parseAiIntent } from './src/features/ai/intent.ts';
 import { buildIntentPrompt } from './src/features/ai/prompt.ts';
@@ -11,6 +12,7 @@ import {
   fetchAlphaVantageOverview,
   fetchAlphaVantageQuote
 } from './src/features/quotes/alphaVantageAnalysts.ts';
+import { fetchTwelveDataQuote } from './src/features/quotes/twelveData.ts';
 import {
   classifyActualVsEstimate,
   classifyRecommendationCounts,
@@ -250,6 +252,11 @@ async function loadSavedState() {
   const savedAlphaVantage = localStorage.getItem('alpha_vantage_api_key');
   if (savedAlphaVantage) document.getElementById('alphaVantageKeyInput').value = savedAlphaVantage;
 
+  const savedTwelveData = localStorage.getItem('twelve_data_api_key');
+  if (savedTwelveData) document.getElementById('twelveDataKeyInput').value = savedTwelveData;
+
+  localStorage.removeItem('fmp_api_key');
+
   const savedGistId = localStorage.getItem('github_gist_id');
   if (savedGistId) document.getElementById('gistIdInput').value = savedGistId;
 
@@ -279,7 +286,7 @@ async function loadSavedState() {
 let headerCredentialsHidden = false;
 
 function updateHeaderCredentialsVisibility() {
-  const inputIds = ['apiKeyInput', 'finnhubKeyInput', 'alphaVantageKeyInput', 'gistIdInput', 'githubTokenInput'];
+  const inputIds = ['apiKeyInput', 'finnhubKeyInput', 'alphaVantageKeyInput', 'twelveDataKeyInput', 'gistIdInput', 'githubTokenInput'];
   const inputs = inputIds.map(id => document.getElementById(id));
   const allFieldsFilled = ['apiKeyInput', 'finnhubKeyInput', 'gistIdInput', 'githubTokenInput']
     .every(id => document.getElementById(id).value.trim().length > 0);
@@ -338,6 +345,9 @@ async function saveApiKeys() {
   const alphaVantageKey = document.getElementById('alphaVantageKeyInput').value.trim();
   if (alphaVantageKey) localStorage.setItem('alpha_vantage_api_key', alphaVantageKey);
   else localStorage.removeItem('alpha_vantage_api_key');
+  const twelveDataKey = document.getElementById('twelveDataKeyInput').value.trim();
+  if (twelveDataKey) localStorage.setItem('twelve_data_api_key', twelveDataKey);
+  else localStorage.removeItem('twelve_data_api_key');
   renderBoardAnalystConsensus(getMarketInsightsTicker(), true);
 
   const rawGist = document.getElementById('gistIdInput').value.trim();
@@ -1200,8 +1210,13 @@ async function fetchBoardAnalystTarget(ticker) {
 function renderBoardAnalystConsensus(ticker, force = false) {
   const container = document.getElementById('boardAnalystConsensus');
   if (!container) return;
-  if (!ticker || !state.positions[ticker]) {
+  const hideConsensus = () => {
+    container.textContent = '';
+    container.removeAttribute('title');
     container.className = 'hidden';
+  };
+  if (!ticker || !state.positions[ticker]) {
+    hideConsensus();
     return;
   }
 
@@ -1233,29 +1248,22 @@ function renderBoardAnalystConsensus(ticker, force = false) {
   }
 
   if (!force && error?.credentials === credentials && now - error.failedAt < BOARD_ANALYST_RETRY_MS) {
-    container.textContent = `${ticker} analyst target unavailable`;
-    container.title = error.message;
-    container.className = 'rounded border border-amber-800 bg-amber-950/30 px-2.5 py-1 text-[10px] font-semibold text-amber-300';
+    hideConsensus();
     return;
   }
 
   if (!finnhubKey && !alphaVantageKey) {
-    container.textContent = 'Analyst consensus · add provider API key';
-    container.title = 'Save a Finnhub or Alpha Vantage API key in the header credentials.';
-    container.className = 'rounded border border-slate-700 bg-slate-900 px-2.5 py-1 text-[10px] font-semibold text-slate-400';
+    hideConsensus();
     return;
   }
 
   const existingRequest = boardAnalystRequests.get(ticker);
   if (existingRequest?.credentials === credentials) {
-    container.textContent = `${ticker} analyst consensus · loading…`;
-    container.className = 'rounded border border-slate-700 bg-slate-900 px-2.5 py-1 text-[10px] font-semibold text-slate-400';
+    hideConsensus();
     return;
   }
 
-  container.textContent = `${ticker} analyst consensus · loading…`;
-  container.title = '';
-  container.className = 'rounded border border-slate-700 bg-slate-900 px-2.5 py-1 text-[10px] font-semibold text-slate-400';
+  hideConsensus();
   const request = { credentials };
   boardAnalystRequests.set(ticker, request);
   fetchBoardAnalystTarget(ticker).then(result => {
@@ -1267,7 +1275,19 @@ function renderBoardAnalystConsensus(ticker, force = false) {
     if (localStorage.getItem('finnhub_api_key') !== finnhubKey ||
         localStorage.getItem('alpha_vantage_api_key') !== alphaVantageKey) return;
     const message = requestError instanceof Error ? requestError.message : String(requestError);
-    boardAnalystErrors.set(ticker, { credentials, failedAt: Date.now(), message });
+    const summaryParts = [];
+    if (message.includes('Finnhub analyst price targets are restricted')) {
+      summaryParts.push('Finnhub plan restricted');
+    }
+    if (/25 requests per day|rate limit|frequency exceeded/i.test(message)) {
+      summaryParts.push('Alpha Vantage limit reached');
+    } else if (alphaVantageKey && message.includes('Alpha Vantage')) {
+      summaryParts.push('Alpha Vantage returned no target');
+    } else if (!alphaVantageKey) {
+      summaryParts.push('add Alpha Vantage key for fallback');
+    }
+    const summary = summaryParts.join(' · ') || 'provider access or data unavailable';
+    boardAnalystErrors.set(ticker, { credentials, failedAt: Date.now(), message, summary });
   }).finally(() => {
     if (boardAnalystRequests.get(ticker) === request) boardAnalystRequests.delete(ticker);
     if (getMarketInsightsTicker() === ticker) renderBoardAnalystConsensus(ticker);
@@ -1809,8 +1829,9 @@ async function loadMarketInsight(section, force = false) {
       else renderMarketInsightAnalysts(result);
       setMarketInsightsStatus(`Finnhub · updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'success');
     } catch (error) {
-      if (!alphaVantageKey) throw error;
+      let fallbackFailure = error;
       try {
+        if (!alphaVantageKey) throw error;
         const result = await fetchAlphaVantageInsight(section, alphaVantageKey, ticker, force);
         if (!hasMarketInsightData(section, result)) {
           throw new Error(`Alpha Vantage returned no ${section} data for ${ticker}.`);
@@ -1822,10 +1843,11 @@ async function loadMarketInsight(section, force = false) {
         else renderMarketInsightAnalysts(result);
         setMarketInsightsStatus(`Alpha Vantage · updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'success');
       } catch (fallbackError) {
-        throw new Error(
+        fallbackFailure = new Error(
           `Finnhub failed: ${error instanceof Error ? error.message : String(error)}. Alpha Vantage fallback failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}.`
         );
       }
+      throw fallbackFailure;
     }
   } catch (error) {
     if (requestId !== insightRequestId) return;
@@ -2186,22 +2208,34 @@ function formatRiskTrigger(triggerValue, currentValue) {
   return `Position value $${formatUSD(triggerValue)} (${bufferPct.toFixed(1)}% buffer)`;
 }
 
-function renderProjectionTable(gross, totalComms, debtToUse, marginChargedToUse, baseDateStr) {
+function renderProjectionTable(gross, totalComms, debtToUse, marginChargedToUse, entryDate) {
   const tableBody = document.getElementById('projectionTableBody');
   tableBody.innerHTML = '';
   
   if (debtToUse > 0 || gross > 0) {
-    const dayOffsets = [0, 7, 14, 21, 28, 35];
-    const base = baseDateStr ? new Date(baseDateStr + "T12:00:00") : new Date();
+    getUsEquityProjectionDates(new Date(), entryDate).forEach(({ date, daysFromToday, kind }) => {
+      const dateFormatted = date.toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric'
+      });
+      if (kind === 'entry') {
+        const entryRow = document.createElement('tr');
+        entryRow.className = 'border-b border-slate-800/50 text-slate-500';
+        entryRow.innerHTML = `
+          <td class="py-1.5 px-3 text-[10px] font-medium">Entry · ${dateFormatted}</td>
+          <td colspan="4" class="py-1.5 px-3 text-[10px] italic">Position opened · projection values start today</td>
+        `;
+        tableBody.appendChild(entryRow);
+        return;
+      }
+      const label = kind === 'today'
+        ? `${dateFormatted} <span class="ml-1 text-[9px] font-normal uppercase tracking-wide text-cyan-500/80">Today</span>`
+        : kind === 'week-end'
+          ? `${dateFormatted} (End of week · +${daysFromToday}d)`
+          : `${dateFormatted} (+${daysFromToday}d)`;
 
-    dayOffsets.forEach(days => {
-      const d = new Date(base);
-      d.setDate(d.getDate() + days);
-      
-      const dateFormatted = `${d.toLocaleDateString('en-US', { month: 'short' })} ${d.getDate()}`;
-      const label = days === 0 ? `${dateFormatted} (Today)` : `${dateFormatted} (+${days}d)`;
-
-      const b_t = debtToUse * Math.pow(1 + getDailyRate(), days);
+      const b_t = debtToUse * Math.pow(1 + getDailyRate(), daysFromToday);
       const additionalAccrual = b_t - debtToUse;
       const m_d = marginChargedToUse + additionalAccrual;
       const fee_c = totalComms + m_d;
@@ -2209,7 +2243,7 @@ function renderProjectionTable(gross, totalComms, debtToUse, marginChargedToUse,
       const dr = b_t * getDailyRate();
 
       const tr = document.createElement('tr');
-      tr.className = days === 0 ? "bg-slate-900/80 font-bold" : "hover:bg-slate-900/40";
+      tr.className = kind === 'today' ? "bg-slate-900/80 font-bold" : "hover:bg-slate-900/40";
       const netClass = net_p >= 0 ? "text-emerald-400" : "text-rose-400";
       const netSign = net_p >= 0 ? "+" : "";
 
@@ -2321,6 +2355,7 @@ async function fetchLivePriceFromProviders(symbol) {
 
   const finnhubKey = localStorage.getItem('finnhub_api_key');
   const alphaVantageKey = localStorage.getItem('alpha_vantage_api_key') || '';
+  const twelveDataKey = localStorage.getItem('twelve_data_api_key') || '';
 
   if (finnhubKey) {
     try {
@@ -2339,6 +2374,22 @@ async function fetchLivePriceFromProviders(symbol) {
       }
     } catch (error) {
       providerErrors.push(`Finnhub: ${error.message}`);
+    }
+  }
+
+  if (!price && twelveDataKey) {
+    try {
+      const quote = await fetchTwelveDataQuote(twelveDataKey, symbol);
+      price = quote.price;
+      sourceName = `Twelve Data · ${symbol}`;
+      quoteDetails = parseFinnhubQuoteDetails({
+        d: quote.change,
+        dp: quote.changePercent,
+        h: quote.high,
+        l: quote.low
+      });
+    } catch (error) {
+      providerErrors.push(`Twelve Data: ${error.message}`);
     }
   }
 
@@ -2806,20 +2857,19 @@ async function applyPortfolioActions(action) {
       return;
     }
 
-    const availableShares = Number(pos.shares);
-    if (!Number.isFinite(availableShares) || availableShares <= 0) {
-      logTerminal(`[Error]: Position ${ticker} has no valid shares to sell.`);
-      return;
-    }
-
     const hasRequestedShares = action.shares !== null && action.shares !== undefined;
-    const requestedShares = hasRequestedShares ? Number(action.shares) : availableShares;
-    if (!Number.isFinite(requestedShares) || requestedShares <= 0) {
-      logTerminal(`[Sell Error]: Enter a positive share quantity, or omit the quantity to sell all ${ticker} shares.`);
-      showToast('Sell quantity must be greater than zero.', 'error');
+    let sharesToSell;
+    try {
+      sharesToSell = resolveSaleQuantity(
+        Number(pos.shares),
+        hasRequestedShares ? Number(action.shares) : null
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logTerminal(`[Sell Error]: ${message}`);
+      showToast(message, 'error');
       return;
     }
-    const sharesToSell = Math.min(availableShares, requestedShares);
 
     const sellPrice = Number(action.price);
     if (!Number.isFinite(sellPrice) || sellPrice <= 0) {
@@ -3130,7 +3180,7 @@ async function executeCommand() {
 window.onload = async () => {
   await loadSavedState();
   headerCredentialsHidden = localStorage.getItem('header_credentials_hidden') === 'true';
-  ['apiKeyInput', 'finnhubKeyInput', 'alphaVantageKeyInput', 'gistIdInput', 'githubTokenInput'].forEach(id => {
+  ['apiKeyInput', 'finnhubKeyInput', 'alphaVantageKeyInput', 'twelveDataKeyInput', 'gistIdInput', 'githubTokenInput'].forEach(id => {
     document.getElementById(id).addEventListener('input', updateHeaderCredentialsVisibility);
   });
   const quoteRefreshInterval = document.getElementById('quoteRefreshInterval');
