@@ -185,7 +185,10 @@ describe('RapidAPI Yahoo Finance quotes', () => {
             regularMarketChange: { raw: 2.5 },
             regularMarketChangePercent: { raw: 1.3 },
             regularMarketDayHigh: { raw: 197 },
-            regularMarketDayLow: { raw: 192 }
+            regularMarketDayLow: { raw: 192 },
+            preMarketPrice: { raw: 198.25 },
+            preMarketChange: { raw: 5.25 },
+            preMarketChangePercent: { raw: 2.69 }
           }
         }]
       }
@@ -194,7 +197,10 @@ describe('RapidAPI Yahoo Finance quotes', () => {
       change: 2.5,
       changePercent: 1.3,
       high: 197,
-      low: 192
+      low: 192,
+      preMarketPrice: 198.25,
+      preMarketChange: 5.25,
+      preMarketChangePercent: 2.69
     });
   });
 

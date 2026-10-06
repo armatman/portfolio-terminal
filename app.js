@@ -2555,7 +2555,26 @@ async function fetchLivePriceFromProviders(symbol) {
   const twelveDataKey = localStorage.getItem('twelve_data_api_key') || '';
   const rapidApiKey = localStorage.getItem('rapidapi_yahoo_key') || '';
 
-  if (finnhubKey) {
+  let rapidApiQuote = null;
+  if (rapidApiKey) {
+    try {
+      rapidApiQuote = await fetchRapidApiYahooQuote(rapidApiKey, symbol);
+      if (rapidApiQuote.preMarketPrice) {
+        price = rapidApiQuote.preMarketPrice;
+        sourceName = `Yahoo Finance Premarket via RapidAPI · ${symbol}`;
+        quoteDetails = parseFinnhubQuoteDetails({
+          d: rapidApiQuote.preMarketChange,
+          dp: rapidApiQuote.preMarketChangePercent,
+          h: rapidApiQuote.high,
+          l: rapidApiQuote.low
+        });
+      }
+    } catch (error) {
+      providerErrors.push(`Yahoo Finance via RapidAPI: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  if (!price && finnhubKey) {
     try {
       const res = await fetchQuoteProvider(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(finnhubSymbol)}&token=${encodeURIComponent(finnhubKey)}`);
       if (res.ok) {
@@ -2607,20 +2626,15 @@ async function fetchLivePriceFromProviders(symbol) {
     }
   }
 
-  if (!price && rapidApiKey) {
-    try {
-      const quote = await fetchRapidApiYahooQuote(rapidApiKey, symbol);
-      price = quote.price;
-      sourceName = `Yahoo Finance via RapidAPI · ${symbol}`;
-      quoteDetails = parseFinnhubQuoteDetails({
-        d: quote.change,
-        dp: quote.changePercent,
-        h: quote.high,
-        l: quote.low
-      });
-    } catch (error) {
-      providerErrors.push(`Yahoo Finance via RapidAPI: ${error instanceof Error ? error.message : String(error)}`);
-    }
+  if (!price && rapidApiQuote) {
+    price = rapidApiQuote.price;
+    sourceName = `Yahoo Finance via RapidAPI · ${symbol}`;
+    quoteDetails = parseFinnhubQuoteDetails({
+      d: rapidApiQuote.change,
+      dp: rapidApiQuote.changePercent,
+      h: rapidApiQuote.high,
+      l: rapidApiQuote.low
+    });
   }
 
   if (!price) {

@@ -22,6 +22,9 @@ export interface RapidApiYahooQuote {
   changePercent?: number;
   high?: number;
   low?: number;
+  preMarketPrice?: number;
+  preMarketChange?: number;
+  preMarketChangePercent?: number;
 }
 
 export class RapidApiYahooError extends Error {
@@ -60,6 +63,7 @@ export function parseRapidApiYahooQuote(value: unknown): RapidApiYahooQuote {
   if (currentPrice === undefined || currentPrice <= 0) {
     throw new RapidApiYahooError('RapidAPI Yahoo Finance returned no valid current price.');
   }
+  const preMarketPrice = rawNumber(price.preMarketPrice);
   return {
     price: currentPrice,
     ...(rawNumber(price.regularMarketChange) === undefined
@@ -73,7 +77,14 @@ export function parseRapidApiYahooQuote(value: unknown): RapidApiYahooQuote {
       : { high: rawNumber(price.regularMarketDayHigh) }),
     ...(rawNumber(price.regularMarketDayLow) === undefined
       ? {}
-      : { low: rawNumber(price.regularMarketDayLow) })
+      : { low: rawNumber(price.regularMarketDayLow) }),
+    ...(preMarketPrice === undefined || preMarketPrice <= 0 ? {} : { preMarketPrice }),
+    ...(rawNumber(price.preMarketChange) === undefined
+      ? {}
+      : { preMarketChange: rawNumber(price.preMarketChange) }),
+    ...(rawNumber(price.preMarketChangePercent) === undefined
+      ? {}
+      : { preMarketChangePercent: rawNumber(price.preMarketChangePercent) })
   };
 }
 
