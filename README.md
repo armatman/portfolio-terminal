@@ -19,6 +19,8 @@ npm run build
 
 The portfolio accounting and state normalization code lives in `src/domain/portfolio.ts`. Its tests are in `src/domain/portfolio.test.ts`. The current interface still uses the legacy `app.js`; Vite loads it as a module while the UI is migrated incrementally.
 
+The Gemini command flow is split into `src/features/ai/`: `prompt.ts` builds the classifier prompt, `geminiClient.ts` handles model discovery and generation requests, and `intent.ts` validates model output before the existing app dispatcher can act on it. Model discovery is cached per API key for five minutes, and each Gemini request has a 30-second timeout. Portfolio-changing intents still require explicit confirmation.
+
 ## Gemini API key
 
 Enter your Google AI Studio API key in the app and click **Save**. The key is kept in browser session storage and requests are sent directly from the browser to Google's Gemini API. It is cleared when the browser session ends and is not included in portfolio backups or Gist sync.

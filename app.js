@@ -1,4 +1,7 @@
 import { createBlankState, normalizePortfolioState, realizeClosedTrade, resolveTradeDateTimestamp } from './src/domain/portfolio.ts';
+import { generateIntentText, GeminiApiError, listGeminiModels } from './src/features/ai/geminiClient.ts';
+import { parseAiIntent } from './src/features/ai/intent.ts';
+import { buildIntentPrompt } from './src/features/ai/prompt.ts';
 
 // ==========================================
 // USER-CONFIGURABLE BROKER DEFAULT ASSUMPTIONS
@@ -2037,23 +2040,6 @@ function confirmAiPortfolioAction(action) {
   return confirm(`Gemini interpreted your input as this portfolio change:\n\n${message}\n\nApply it?`);
 }
 
-async function readGeminiResponse(response, operation) {
-  let data;
-  try {
-    data = await response.json();
-  } catch {
-    throw new Error(`Gemini ${operation} returned an unreadable response (HTTP ${response.status}).`);
-  }
-  if (!data || typeof data !== 'object' || Array.isArray(data)) {
-    throw new Error(`Gemini ${operation} returned an invalid response body (HTTP ${response.status}).`);
-  }
-  if (!response.ok || data.error) {
-    const message = data.error?.message || response.statusText || 'Request failed';
-    throw new Error(`Gemini ${operation} failed (HTTP ${response.status}): ${message}`);
-  }
-  return data;
-}
-
 async function executeCommand() {
   const input = document.getElementById('cmdInput');
   const text = input.value.trim();
@@ -2105,187 +2091,22 @@ async function executeCommand() {
   document.getElementById('aiStatus').innerText = "CONNECTING...";
   document.getElementById('aiStatus').className = "text-amber-400 text-[10px]";
 
-  const activeTickers = Object.keys(state.positions);
-  const dynamicTodayStr = new Date().toISOString().split('T')[0];
-
-  const prompt = `
-Analyze this trading input: "${text}".
-Active margin positions: ${JSON.stringify(activeTickers)}.
-Currently viewed asset: "${state.activeView}".
-Today's reference date: ${dynamicTodayStr}.
-
-Classify intent into ONE JSON structure (NO markdown backticks, raw JSON only):
-
-1. ADD CASH / UNLEVERAGED STOCK (e.g. "add cash stock 50 AAPL", "add cash stock 50 AAPL at 230", "bought 10 VOO for cash", "cash stock 20 NVDA"):
-{
-  "intent": "action",
-  "action": "add_cash_stock",
-  "ticker": "<ticker symbol>",
-  "shares": <number>,
-  "price": <number or null if not stated>
-}
-
-2. REMOVE CASH STOCK (e.g. "remove cash stock AAPL", "delete cash holding VOO"):
-{
-  "intent": "action",
-  "action": "remove_cash_stock",
-  "ticker": "<ticker symbol>"
-}
-
-3. SET CURRENT BALANCE OR MARGIN DEBT (positive for balance, negative for debt; e.g. "balance 5000", "balance -5000"):
-{
-  "intent": "action",
-  "action": "set_free_cash",
-  "amount": <number>
-}
-
-4. LADDERED SCALE-OUT (e.g. "sell 15 JBL for 305 today and 18 for 315 in 7 days"):
-{
-  "intent": "ladder",
-  "ticker": "<ticker symbol, default to activeView>",
-  "steps": [
-    { "shares": <number>, "price": <number>, "days": <integer days from today>, "label": "<short label>" }
-  ]
-}
-
-5. SIDE-BY-SIDE EXIT COMPARISON (e.g. "sell today for 300 vs sell 10 days later for 310"):
-{
-  "intent": "comparison",
-  "ticker": "<ticker symbol or null>",
-  "scenarios": [
-    { "label": "<e.g. Today @ $300>", "price": <number>, "days": <integer days from today> },
-    { "label": "<e.g. 10d Later @ $310>", "price": <number>, "days": <integer days from today> }
-  ]
-}
-
-6. SINGLE WHAT-IF SIMULATION (e.g. "in case of selling for 300 today"):
-{
-  "intent": "simulation",
-  "ticker": "<ticker symbol or null>",
-  "simPrice": <number>,
-  "daysOffset": <integer days from today>,
-  "label": "<short label>"
-}
-
-7. LIVE QUOTE INQUIRY (e.g. "what's the current JBL price?", "quote AAPL"):
-{
-  "intent": "fetch_quote",
-  "ticker": "<ticker symbol, default to activeView>"
-}
-
-8. BUYING SHARES:
-{
-  "intent": "action",
-  "action": "buy",
-  "ticker": "<ticker symbol>",
-  "shares": <number>,
-  "price": <number>,
-  "pt": <number or null>,
-  "date": "<e.g. 05 Oct or null>"
-}
-
-9. SELLING / CLOSING SHARES:
-{
-  "intent": "action",
-  "action": "sell",
-  "ticker": "<ticker symbol>",
-  "shares": <number or null if selling all>,
-  "price": <number>
-}
-
-10. SETTING TARGET (PT or SL):
-{
-  "intent": "action",
-  "action": "set_pt",
-  "ticker": "<ticker symbol or null>",
-  "pt": <number>
-}
-
-11. SETTING MARKET PRICE:
-{
-  "intent": "action",
-  "action": "set_price",
-  "ticker": "<ticker symbol or null>",
-  "price": <number>
-}
-
-12. SYNCING MARGIN BALANCE:
-{
-  "intent": "action",
-  "action": "set_balance",
-  "balance": <number>
-}
-
-13. GENERAL CHAT / Q&A:
-{
-  "intent": "chat",
-  "response": "<concise explanation>"
-}
-`;
-
   try {
-    const requestHeaders = {
-      'Content-Type': 'application/json',
-      'x-goog-api-key': apiKey
-    };
-    const listResponse = await fetch('https://generativelanguage.googleapis.com/v1beta/models', {
-      headers: { 'x-goog-api-key': apiKey }
+    const prompt = buildIntentPrompt({
+      text,
+      activeTickers: Object.keys(state.positions),
+      activeView: state.activeView,
+      today: new Date().toISOString().split('T')[0]
     });
-    const listData = await readGeminiResponse(listResponse, 'model discovery');
-    const activeModels = (Array.isArray(listData.models) ? listData.models : [])
-      .filter(model => model.name && model.supportedGenerationMethods?.includes('generateContent'))
-      .map(model => model.name.replace(/^models\//, ''));
-    activeModels.sort((a, b) => {
-      const flashPreference = Number(b.includes('flash')) - Number(a.includes('flash'));
-      return flashPreference || a.localeCompare(b);
-    });
-    if (activeModels.length === 0) {
-      throw new Error('Gemini returned no models available for generateContent for this key.');
-    }
-
+    const activeModels = await listGeminiModels(apiKey);
     document.getElementById('aiStatus').innerText = "PARSING...";
     let lastError = null;
     let success = false;
 
     for (const model of activeModels) {
       try {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-          method: 'POST',
-          headers: requestHeaders,
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: 0.0,
-              responseMimeType: "application/json"
-            }
-          })
-        });
-        const data = await readGeminiResponse(response, `generateContent with ${model}`);
-        const candidate = data.candidates?.[0];
-        if (!candidate?.content?.parts) {
-          if (candidate?.finishReason === 'SAFETY') {
-            throw new Error(`Gemini blocked the response for safety reasons (${model}).`);
-          }
-          throw new Error(`Gemini returned no usable candidate (${model}).`);
-        }
-        const rawText = candidate.content.parts
-          .map(part => part.text)
-          .filter(text => typeof text === 'string')
-          .join('')
-          .trim();
-        if (!rawText) {
-          throw new Error(`Gemini returned an empty response (${model}).`);
-        }
-
-        let parsed;
-        try {
-          parsed = JSON.parse(rawText);
-        } catch {
-          throw new Error(`Gemini returned invalid JSON (${model}).`);
-        }
-        if (!parsed || typeof parsed !== 'object' || typeof parsed.intent !== 'string') {
-          throw new Error(`Gemini response is missing a valid intent (${model}).`);
-        }
+        const rawText = await generateIntentText(apiKey, model, prompt);
+        const parsed = parseAiIntent(rawText);
 
         if (parsed.intent === "ladder") {
           runLadderSimulation(parsed);
@@ -2294,20 +2115,17 @@ Classify intent into ONE JSON structure (NO markdown backticks, raw JSON only):
           runComparison(parsed);
           logTerminal(`[Comparison Evaluated via ${model}]`);
         } else if (parsed.intent === "simulation") {
-          runSimulation(parsed.simPrice, parsed.daysOffset || 0, parsed.label || "Sim Target", parsed.ticker);
+          runSimulation(parsed.simPrice, parsed.daysOffset, parsed.label, parsed.ticker);
           logTerminal(`[Simulation Evaluated via ${model}]`);
         } else if (parsed.intent === "fetch_quote") {
-          const tickerToFetch = (parsed.ticker && parsed.ticker !== "null") ? parsed.ticker.toUpperCase() : (state.activeView !== "COMBINED" && state.activeView !== "CASH_CUSHION" && state.activeView !== "CLOSED_HISTORY" ? state.activeView : Object.keys(state.positions)[0]);
+          const tickerToFetch = parsed.ticker ? parsed.ticker.toUpperCase() : (state.activeView !== "COMBINED" && state.activeView !== "CASH_CUSHION" && state.activeView !== "CLOSED_HISTORY" ? state.activeView : Object.keys(state.positions)[0]);
           if (tickerToFetch) fetchLivePrice(tickerToFetch);
           else logTerminal("[Notice]: No active ticker specified to fetch quote for.");
         } else if (parsed.intent === "action") {
           if (confirmAiPortfolioAction(parsed)) await applyPortfolioActions(parsed);
           else logTerminal('[AI Action]: Cancelled. No portfolio changes were made.');
         } else if (parsed.intent === "chat") {
-          if (typeof parsed.response !== 'string') throw new Error(`Gemini chat response is invalid (${model}).`);
           logTerminal(`[AI Advisor]: ${parsed.response}`);
-        } else {
-          throw new Error(`Gemini returned unsupported intent "${parsed.intent}" (${model}).`);
         }
 
         document.getElementById('aiStatus').innerText = "READY";
@@ -2316,7 +2134,7 @@ Classify intent into ONE JSON structure (NO markdown backticks, raw JSON only):
         break;
       } catch (err) {
         lastError = err;
-        const isModelAvailabilityError = err.message.includes('HTTP 404') || err.message.includes('HTTP 503');
+        const isModelAvailabilityError = err instanceof GeminiApiError && (err.status === 404 || err.status === 503);
         if (isModelAvailabilityError) {
           continue;
         }
