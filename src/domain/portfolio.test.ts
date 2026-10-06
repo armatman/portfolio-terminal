@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createBlankState,
+  normalizePortfolioBackup,
   normalizePortfolioState,
   realizeClosedTrade,
   resolveTradeDateTimestamp,
@@ -40,6 +41,11 @@ describe('portfolio domain', () => {
 
   it('rejects non-object imported state', () => {
     expect(() => normalizePortfolioState([])).toThrow('Portfolio state must be an object.');
+  });
+
+  it('accepts recognized portfolio backups and rejects unrelated JSON objects', () => {
+    expect(normalizePortfolioBackup({ positions: {} }, 10_000).positions).toEqual({});
+    expect(() => normalizePortfolioBackup({ settings: {} }, 10_000)).toThrow('recognized portfolio backup');
   });
 
   it('parses short buy dates and falls back for invalid dates', () => {

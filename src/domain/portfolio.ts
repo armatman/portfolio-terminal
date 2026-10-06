@@ -158,6 +158,15 @@ export function normalizePortfolioState(candidate: unknown, now = Date.now()): P
   };
 }
 
+export function normalizePortfolioBackup(candidate: unknown, now = Date.now()): PortfolioState {
+  if (!isRecord(candidate)) throw new Error('Portfolio backup must be an object.');
+  const recognizedFields = ['positions', 'marginBalance', 'cashCushion', 'closedTrades', 'activeView', 'startDate'];
+  if (!recognizedFields.some(field => Object.hasOwn(candidate, field))) {
+    throw new Error('File does not contain a recognized portfolio backup.');
+  }
+  return normalizePortfolioState(candidate, now);
+}
+
 function resolveTrancheAcquiredAt(tranche: TradeTranche, fallbackDate: string | undefined, now: number): number {
   const acquiredAt = Number(tranche.acquiredAt);
   if (Number.isFinite(acquiredAt) && acquiredAt > 0) return acquiredAt;

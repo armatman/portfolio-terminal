@@ -40,6 +40,8 @@ export interface AlphaVantageNewsItem {
   url: string;
   source: string;
   datetime: number;
+  sentimentLabel?: string;
+  sentimentScore?: number;
 }
 
 export class AlphaVantageError extends Error {
@@ -138,7 +140,11 @@ export function parseAlphaVantageNews(value: unknown): AlphaVantageNewsItem[] {
       summary: typeof article.summary === 'string' ? article.summary : '',
       url: article.url,
       source: typeof article.source === 'string' ? article.source : 'Alpha Vantage News',
-      datetime: Number.isFinite(timestamp) ? Math.floor(timestamp / 1000) : 0
+      datetime: Number.isFinite(timestamp) ? Math.floor(timestamp / 1000) : 0,
+      ...(typeof article.overall_sentiment_label === 'string' ? { sentimentLabel: article.overall_sentiment_label } : {}),
+      ...(parseOptionalNumber(article.overall_sentiment_score) === undefined
+        ? {}
+        : { sentimentScore: parseOptionalNumber(article.overall_sentiment_score) })
     }];
   });
 }

@@ -99,7 +99,7 @@
           <div id="headerCredentialsFields" class="flex flex-wrap items-end gap-2">
           <div class="flex flex-col gap-1 min-w-[120px]">
             <label for="apiKeyInput" class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Gemini</label>
-            <input id="apiKeyInput" type="password" placeholder="Studio Key" autocomplete="off"
+            <input id="apiKeyInput" type="text" placeholder="Studio Key" autocomplete="off"
                    title="Kept for this browser session. It is sent directly from this browser to Google."
                    class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-emerald-500 w-32 text-slate-200">
           </div>
@@ -113,7 +113,7 @@
 
           <div class="flex flex-col gap-1 min-w-[130px]">
             <label for="alphaVantageKeyInput" class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Alpha Vantage</label>
-            <input id="alphaVantageKeyInput" type="password" placeholder="API key" autocomplete="off"
+            <input id="alphaVantageKeyInput" type="text" placeholder="API key" autocomplete="off"
                    title="Optional market-data fallback. Stored in this browser and sent directly to Alpha Vantage."
                    class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-cyan-500 w-32 text-slate-200">
           </div>
@@ -196,8 +196,8 @@
               <p class="text-xs text-slate-400 mt-1">Start with a trade, add a cash stock, or restore a saved backup to continue.</p>
             </div>
             <div class="flex flex-wrap gap-2">
-              <button onclick="document.getElementById('cmdInput').value='bought 10 AAPL for 100'; document.getElementById('cmdInput').focus();" class="bg-emerald-600 hover:bg-emerald-500 text-black text-[11px] font-bold px-3 py-1.5 rounded transition">Quick Buy</button>
-              <button onclick="document.getElementById('cmdInput').value='add cash stock 10 AAPL'; document.getElementById('cmdInput').focus();" class="bg-cyan-700 hover:bg-cyan-600 text-white text-[11px] font-bold px-3 py-1.5 rounded transition">Add Cash Stock</button>
+              <button onclick="document.getElementById('cmdInput').value='bought [shares] [TICKER] for [price]'; document.getElementById('cmdInput').focus();" class="bg-emerald-600 hover:bg-emerald-500 text-black text-[11px] font-bold px-3 py-1.5 rounded transition">Quick Buy</button>
+              <button onclick="document.getElementById('cmdInput').value='add cash stock [shares] [TICKER] for [price]'; document.getElementById('cmdInput').focus();" class="bg-cyan-700 hover:bg-cyan-600 text-white text-[11px] font-bold px-3 py-1.5 rounded transition">Add Cash Stock</button>
               <button onclick="document.getElementById('importFileInput').click()" class="bg-slate-800 hover:bg-slate-700 text-purple-300 text-[11px] font-bold px-3 py-1.5 rounded border border-purple-700 transition">Import Backup</button>
             </div>
           </div>
@@ -205,7 +205,11 @@
 
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div class="text-2xl font-black text-white" id="boardTitle">COMBINED PORTFOLIO</div>
-          <button id="marketInsightsToggle" type="button" onclick="toggleMarketInsights()" class="hidden rounded border border-cyan-800/70 bg-cyan-950/30 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 transition hover:bg-cyan-900/50">
+          <div class="flex flex-wrap items-center gap-2">
+            <div id="boardDailyMove" class="hidden"></div>
+            <div id="boardAnalystConsensus" class="hidden"></div>
+          </div>
+          <button id="marketInsightsToggle" type="button" onclick="toggleMarketInsights()" aria-expanded="false" aria-controls="marketInsightsPanel" class="hidden rounded border border-cyan-800/70 bg-cyan-950/30 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 transition hover:bg-cyan-900/50">
             Market insights
           </button>
         </div>
@@ -411,7 +415,7 @@
       </div>
 
       <div class="flex gap-2">
-        <input id="cmdInput" type="text" placeholder="e.g. bought 20 JBL for 290, pt 305 | add cash stock 50 AAPL | b: -5000" 
+        <input id="cmdInput" type="text" placeholder="e.g. sell today for [current price] vs sell 14 days later for [target price]"
                class="flex-1 bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-emerald-500 text-white"
                onkeydown="if(event.key === 'Enter') executeCommand()">
         <button onclick="executeCommand()" class="bg-emerald-600 hover:bg-emerald-500 text-black text-xs font-bold px-4 py-2 rounded transition">
@@ -425,15 +429,15 @@
       <div class="pt-3 mt-3 border-t border-slate-800">
         <p class="text-[10px] text-slate-500 uppercase tracking-wider mb-2 font-bold">Quick Commands Guide</p>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2 text-xs text-slate-400">
-          <div><span class="text-emerald-400 font-bold">Buy Shares:</span> bought 20 JBL for 290, pt 305</div>
-          <div><span class="text-cyan-400 font-bold">Non-Margin Holding:</span> add cash stock 50 AAPL <span class="text-slate-600 italic">or</span> remove cash stock AAPL</div>
+          <div><span class="text-emerald-400 font-bold">Buy Shares:</span> <span id="hintBuyShares"></span></div>
+          <div><span class="text-cyan-400 font-bold">Non-Margin Holding:</span> <span id="hintCashHolding"></span></div>
           <div><span class="text-cyan-400 font-bold">Balance / Margin Debt:</span> balance 5000 <span class="text-slate-600 italic">or</span> balance -5000</div>
-          <div><span class="text-purple-400 font-bold">Ladder Exit:</span> sell 10 JBL for 305 today and 10 for 315 in 7 days</div>
-          <div><span class="text-cyan-400 font-bold">Exit Comparison:</span> sell today for 300 vs sell 10 days later for 310</div>
-          <div><span class="text-amber-400 font-bold">Live Market Quote:</span> quote JBL <span class="text-slate-600 italic">or</span> what's the current JBL price?</div>
-          <div><span class="text-cyan-400 font-bold">Quote Symbol:</span> quote symbol 7203 finnhub=TSE:7203 stooq=7203.jp</div>
+          <div><span class="text-purple-400 font-bold">Ladder Exit:</span> <span id="hintLadderExit"></span></div>
+          <div><span class="text-cyan-400 font-bold">Exit Comparison:</span> <span id="hintExitComparison"></span></div>
+          <div><span class="text-amber-400 font-bold">Live Market Quote:</span> <span id="hintLiveQuote"></span></div>
+          <div><span class="text-cyan-400 font-bold">Quote Symbol:</span> quote symbol [TICKER] finnhub=[provider symbol] stooq=[provider symbol]</div>
           <div><span class="text-emerald-400 font-bold">Sync Margin Debt:</span> b: -5000</div>
-          <div><span class="text-rose-400 font-bold">Close Position:</span> sold all JBL for 305</div>
+          <div><span class="text-rose-400 font-bold">Close Position:</span> <span id="hintClosePosition"></span></div>
         </div>
       </div>
     </div>

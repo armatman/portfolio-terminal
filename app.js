@@ -1,5 +1,5 @@
-import { createBlankState, normalizePortfolioState, realizeClosedTrade, resolveTradeDateTimestamp } from './src/domain/portfolio.ts';
-import { generateIntentText, listGeminiModels, shouldTryAnotherGeminiModel } from './src/features/ai/geminiClient.ts';
+import { createBlankState, normalizePortfolioBackup, normalizePortfolioState, realizeClosedTrade, resolveTradeDateTimestamp } from './src/domain/portfolio.ts';
+import { generateIntentText, GeminiApiError, listGeminiModels, shouldTryAnotherGeminiModel } from './src/features/ai/geminiClient.ts';
 import { parseAiIntent } from './src/features/ai/intent.ts';
 import { buildIntentPrompt } from './src/features/ai/prompt.ts';
 import { parseFinnhubQuoteDetails } from './src/features/quotes/finnhubQuote.ts';
@@ -11,6 +11,15 @@ import {
   fetchAlphaVantageOverview,
   fetchAlphaVantageQuote
 } from './src/features/quotes/alphaVantageAnalysts.ts';
+import {
+  classifyActualVsEstimate,
+  classifyRecommendationCounts,
+  classifySentimentScore,
+  calculateTargetUpsidePercent,
+  sentimentLabel,
+  summarizeDailyQuote,
+  summarizeGrowth
+} from './src/features/quotes/sentiment.ts';
 
 // ==========================================
 // USER-CONFIGURABLE BROKER DEFAULT ASSUMPTIONS
@@ -49,6 +58,13 @@ let activeInsightSection = 'news';
 let loadedInsightTicker = '';
 let insightRequestId = 0;
 let insightTicker = '';
+const boardAnalystSnapshots = new Map();
+const boardAnalystErrors = new Map();
+const boardAnalystRequests = new Map();
+const BOARD_ANALYST_CACHE_TTL_MS = 5 * 60 * 1000;
+const BOARD_ANALYST_RETRY_MS = 60 * 1000;
+const FINNHUB_ANALYST_RESTRICTED_PREFIX = 'finnhub_analyst_target_restricted:';
+const QUOTE_PROVIDER_TIMEOUT_MS = 15 * 1000;
 
 const QUOTE_REFRESH_INTERVAL_KEY = 'quote_refresh_interval_ms';
 const DEFAULT_QUOTE_REFRESH_INTERVAL_MS = 60 * 1000;
@@ -314,10 +330,15 @@ async function saveApiKeys() {
 
   const fKey = document.getElementById('finnhubKeyInput').value.trim();
   localStorage.setItem('finnhub_api_key', fKey);
+  for (let index = sessionStorage.length - 1; index >= 0; index -= 1) {
+    const key = sessionStorage.key(index);
+    if (key?.startsWith(FINNHUB_ANALYST_RESTRICTED_PREFIX)) sessionStorage.removeItem(key);
+  }
 
   const alphaVantageKey = document.getElementById('alphaVantageKeyInput').value.trim();
   if (alphaVantageKey) localStorage.setItem('alpha_vantage_api_key', alphaVantageKey);
   else localStorage.removeItem('alpha_vantage_api_key');
+  renderBoardAnalystConsensus(getMarketInsightsTicker(), true);
 
   const rawGist = document.getElementById('gistIdInput').value.trim();
   const cleanGistId = extractCleanGistId(rawGist);
@@ -628,6 +649,25 @@ function renderConsoleQuickActions() {
   container.innerHTML = '';
 
   const pos = state.positions[state.activeView];
+  const ticker = pos?.ticker || '[TICKER]';
+  const currentPrice = pos && Number(pos.currentPrice) > 0 ? Number(pos.currentPrice) : null;
+  const priceText = currentPrice === null ? '[current price]' : formatUSD(currentPrice);
+  const comparisonPrice = currentPrice === null ? null : Number((currentPrice * 1.02).toFixed(2));
+  const comparisonPriceText = comparisonPrice === null ? '[price]' : formatUSD(comparisonPrice);
+  const commandInput = document.getElementById('cmdInput');
+  commandInput.placeholder = `e.g. sell today for ${priceText} vs sell 14 days later for ${comparisonPriceText}`;
+  document.getElementById('hintBuyShares').textContent = `bought [shares] ${ticker} for ${priceText}, pt [target]`;
+  document.getElementById('hintCashHolding').textContent =
+    `add cash stock [shares] ${ticker} or remove cash stock ${ticker}`;
+  document.getElementById('hintLadderExit').textContent =
+    `sell [shares] ${ticker} for ${priceText} today and [shares] for [price] in 7 days`;
+  document.getElementById('hintExitComparison').textContent =
+    `sell today for ${priceText} vs sell 14 days later for ${comparisonPriceText}`;
+  document.getElementById('hintLiveQuote').textContent =
+    `quote ${ticker} or what's the current ${ticker} price?`;
+  document.getElementById('hintClosePosition').textContent =
+    `sold all ${ticker} for ${priceText}`;
+
   const label = document.createElement('span');
   label.className = 'text-[10px] font-bold uppercase tracking-wider text-slate-500';
 
@@ -635,7 +675,7 @@ function renderConsoleQuickActions() {
     label.textContent = 'Quick actions';
     const hint = document.createElement('span');
     hint.className = 'text-[10px] text-slate-500';
-    hint.textContent = 'Select a margin ticker to use stock shortcuts.';
+    hint.textContent = 'Examples use [TICKER]; select a margin holding to use its tracked price.';
     container.append(label, hint);
     return;
   }
@@ -644,13 +684,17 @@ function renderConsoleQuickActions() {
   label.textContent = `${pos.ticker} · ${formatUSD(pos.shares)} shares`;
   container.appendChild(label);
 
-  const currentPrice = Number(pos.currentPrice) > 0 ? Number(pos.currentPrice) : null;
-  const priceText = currentPrice ? formatUSD(currentPrice) : '[price]';
   const actions = [
     { text: 'Quote', command: `quote ${pos.ticker}`, color: 'text-amber-300 border-amber-900/70 hover:bg-amber-950/50' },
     { text: 'Buy…', command: `bought [shares] ${pos.ticker} for ${priceText}`, color: 'text-emerald-300 border-emerald-900/70 hover:bg-emerald-950/50' },
     { text: 'Sell part…', command: `sold [shares] ${pos.ticker} for ${priceText}`, color: 'text-rose-300 border-rose-900/70 hover:bg-rose-950/50' },
     { text: 'Sell all…', command: `sold all ${pos.ticker} for ${priceText}`, color: 'text-rose-300 border-rose-900/70 hover:bg-rose-950/50' },
+    {
+      text: 'Compare exits…',
+      command: `sell today for ${priceText} vs sell 14 days later for ${comparisonPriceText}`,
+      selectText: comparisonPriceText,
+      color: 'text-cyan-300 border-cyan-900/70 hover:bg-cyan-950/50'
+    },
     { text: 'Set target…', command: `set ${pos.ticker} PT to [price]`, color: 'text-cyan-300 border-cyan-900/70 hover:bg-cyan-950/50' }
   ];
 
@@ -663,7 +707,10 @@ function renderConsoleQuickActions() {
       const input = document.getElementById('cmdInput');
       input.value = action.command;
       input.focus();
-      if (action.command.includes('[')) {
+      if (action.selectText) {
+        const selectionStart = action.command.lastIndexOf(action.selectText);
+        input.setSelectionRange(selectionStart, selectionStart + action.selectText.length);
+      } else if (action.command.includes('[')) {
         const selectionStart = action.command.indexOf('[');
         const selectionEnd = action.command.indexOf(']', selectionStart) + 1;
         input.setSelectionRange(selectionStart, selectionEnd);
@@ -929,7 +976,19 @@ function renderCashCushionPanel() {
       tr.appendChild(cell);
       return cell;
     };
-    addCell(h.ticker, 'py-2 px-3 text-cyan-300 font-bold');
+    const tickerCell = addCell('', 'py-2 px-3 text-cyan-300 font-bold');
+    tickerCell.append(
+      createInsightElement('span', '', h.ticker),
+      document.createTextNode(' '),
+      sentimentBadge(
+        Number.isFinite(h.quoteDetails?.change)
+          ? h.quoteDetails.change > 0 ? 'bullish' : h.quoteDetails.change < 0 ? 'bearish' : 'neutral'
+          : 'unknown',
+        Number.isFinite(h.quoteDetails?.change)
+          ? `${h.quoteDetails.change > 0 ? '↑' : h.quoteDetails.change < 0 ? '↓' : '→'} ${sentimentLabel(h.quoteDetails.change > 0 ? 'bullish' : h.quoteDetails.change < 0 ? 'bearish' : 'neutral')}`
+          : 'No daily signal'
+      )
+    );
     addCell(shares.toLocaleString('en-US', { maximumFractionDigits: 3 }), 'py-2 px-3 text-right text-slate-200 tabular-nums');
     const priceCell = document.createElement('td');
     priceCell.className = 'py-2 px-3 text-right text-emerald-400 font-semibold tabular-nums';
@@ -1055,6 +1114,166 @@ function createInsightElement(tagName, className = '', text = '') {
   return element;
 }
 
+function sentimentBadge(direction, label = sentimentLabel(direction)) {
+  const styles = {
+    bullish: 'border-emerald-800 bg-emerald-950/50 text-emerald-300',
+    bearish: 'border-rose-800 bg-rose-950/50 text-rose-300',
+    neutral: 'border-slate-700 bg-slate-900 text-slate-300',
+    unknown: 'border-slate-800 bg-slate-950 text-slate-500'
+  };
+  const badge = createInsightElement(
+    'span',
+    `inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${styles[direction]}`,
+    label
+  );
+  badge.dataset.sentiment = direction;
+  badge.title = direction === 'unknown'
+    ? 'The selected data source did not provide a sentiment signal.'
+    : 'A directional marker based only on the provider values shown in this section.';
+  return badge;
+}
+
+function setBoardDailyMove(change, coverage, total, changePercent) {
+  const container = document.getElementById('boardDailyMove');
+  if (!container) return;
+  const details = [];
+  if (Number.isFinite(change)) {
+    details.push(`${change >= 0 ? '+' : '−'}$${formatUSD(Math.abs(change))}`);
+  } else {
+    details.push('unavailable');
+  }
+  if (Number.isFinite(changePercent)) {
+    details.push(`${changePercent >= 0 ? '+' : '−'}${Math.abs(changePercent).toFixed(2)}%`);
+  }
+  details.push(`quotes ${coverage}/${total}`);
+  container.textContent = `Today’s move · ${details.join(' · ')}`;
+  container.className = 'rounded border border-slate-700 bg-slate-900/70 px-2.5 py-1 text-[10px] font-semibold text-slate-300';
+}
+
+function getAnalystTargetPrice(result) {
+  const targets = result?.targets && typeof result.targets === 'object' ? result.targets : {};
+  const values = [result?.targetPrice, targets.targetMean, targets.targetMedian];
+  return values.find(value => typeof value === 'number' && Number.isFinite(value) && value > 0);
+}
+
+async function fetchBoardAnalystTarget(ticker) {
+  const finnhubKey = localStorage.getItem('finnhub_api_key') || '';
+  const alphaVantageKey = localStorage.getItem('alpha_vantage_api_key') || '';
+  const failures = [];
+  const restrictionKey = `${FINNHUB_ANALYST_RESTRICTED_PREFIX}${ticker}`;
+  const finnhubRestricted = sessionStorage.getItem(restrictionKey) === 'true';
+
+  if (finnhubKey && !finnhubRestricted) {
+    try {
+      const result = await fetchFinnhubInsight(finnhubKey, 'stock/price-target', { symbol: ticker });
+      const targetPrice = getAnalystTargetPrice({ targets: result });
+      if (targetPrice) return { targetPrice, source: 'Finnhub' };
+      failures.push('Finnhub returned no consensus price target.');
+    } catch (error) {
+      if (error?.status === 403) {
+        sessionStorage.setItem(restrictionKey, 'true');
+        failures.push('Finnhub analyst price targets are restricted for this symbol or plan (HTTP 403).');
+      } else {
+        failures.push(`Finnhub: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  } else if (finnhubKey && finnhubRestricted) {
+    failures.push('Finnhub analyst price targets were previously restricted for this symbol in this session.');
+  }
+
+  if (alphaVantageKey) {
+    try {
+      const result = await fetchAlphaVantageAnalysts(alphaVantageKey, ticker);
+      if (result.targetPrice) return { targetPrice: result.targetPrice, source: 'Alpha Vantage' };
+      failures.push('Alpha Vantage returned no consensus price target.');
+    } catch (error) {
+      failures.push(`Alpha Vantage: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  if (failures.length === 0) {
+    throw new Error('Add a Finnhub or Alpha Vantage API key to load analyst consensus.');
+  }
+  throw new Error(failures.join(' '));
+}
+
+function renderBoardAnalystConsensus(ticker, force = false) {
+  const container = document.getElementById('boardAnalystConsensus');
+  if (!container) return;
+  if (!ticker || !state.positions[ticker]) {
+    container.className = 'hidden';
+    return;
+  }
+
+  const finnhubKey = localStorage.getItem('finnhub_api_key') || '';
+  const alphaVantageKey = localStorage.getItem('alpha_vantage_api_key') || '';
+  const credentials = `${finnhubKey}|${alphaVantageKey}`;
+  const now = Date.now();
+  const snapshot = boardAnalystSnapshots.get(ticker);
+  const error = boardAnalystErrors.get(ticker);
+  const currentPrice = Number(state.positions[ticker].currentPrice);
+
+  if (!force && snapshot?.credentials === credentials && now - snapshot.fetchedAt < BOARD_ANALYST_CACHE_TTL_MS) {
+    const upside = calculateTargetUpsidePercent(snapshot.targetPrice, currentPrice);
+    if (upside !== undefined) {
+      const color = upside > 0
+        ? 'border-emerald-800 bg-emerald-950/40 text-emerald-300'
+        : upside < 0
+          ? 'border-rose-800 bg-rose-950/40 text-rose-300'
+          : 'border-slate-700 bg-slate-900 text-slate-300';
+      container.textContent = `${ticker} analyst consensus · $${formatUSD(snapshot.targetPrice)} · ${upside >= 0 ? '+' : ''}${upside.toFixed(2)}%`;
+      container.title = `Analyst consensus from ${snapshot.source}: $${formatUSD(snapshot.targetPrice)} target versus current price $${formatUSD(currentPrice)}.`;
+      container.className = `rounded border px-2.5 py-1 text-[10px] font-semibold ${color}`;
+    } else {
+      container.textContent = `${ticker} analyst consensus · $${formatUSD(snapshot.targetPrice)} · current price unavailable`;
+      container.title = `Consensus price target from ${snapshot.source}.`;
+      container.className = 'rounded border border-slate-700 bg-slate-900 px-2.5 py-1 text-[10px] font-semibold text-slate-300';
+    }
+    return;
+  }
+
+  if (!force && error?.credentials === credentials && now - error.failedAt < BOARD_ANALYST_RETRY_MS) {
+    container.textContent = `${ticker} analyst target unavailable`;
+    container.title = error.message;
+    container.className = 'rounded border border-amber-800 bg-amber-950/30 px-2.5 py-1 text-[10px] font-semibold text-amber-300';
+    return;
+  }
+
+  if (!finnhubKey && !alphaVantageKey) {
+    container.textContent = 'Analyst consensus · add provider API key';
+    container.title = 'Save a Finnhub or Alpha Vantage API key in the header credentials.';
+    container.className = 'rounded border border-slate-700 bg-slate-900 px-2.5 py-1 text-[10px] font-semibold text-slate-400';
+    return;
+  }
+
+  const existingRequest = boardAnalystRequests.get(ticker);
+  if (existingRequest?.credentials === credentials) {
+    container.textContent = `${ticker} analyst consensus · loading…`;
+    container.className = 'rounded border border-slate-700 bg-slate-900 px-2.5 py-1 text-[10px] font-semibold text-slate-400';
+    return;
+  }
+
+  container.textContent = `${ticker} analyst consensus · loading…`;
+  container.title = '';
+  container.className = 'rounded border border-slate-700 bg-slate-900 px-2.5 py-1 text-[10px] font-semibold text-slate-400';
+  const request = { credentials };
+  boardAnalystRequests.set(ticker, request);
+  fetchBoardAnalystTarget(ticker).then(result => {
+    if (localStorage.getItem('finnhub_api_key') !== finnhubKey ||
+        localStorage.getItem('alpha_vantage_api_key') !== alphaVantageKey) return;
+    boardAnalystSnapshots.set(ticker, { ...result, credentials, fetchedAt: Date.now() });
+    boardAnalystErrors.delete(ticker);
+  }).catch(requestError => {
+    if (localStorage.getItem('finnhub_api_key') !== finnhubKey ||
+        localStorage.getItem('alpha_vantage_api_key') !== alphaVantageKey) return;
+    const message = requestError instanceof Error ? requestError.message : String(requestError);
+    boardAnalystErrors.set(ticker, { credentials, failedAt: Date.now(), message });
+  }).finally(() => {
+    if (boardAnalystRequests.get(ticker) === request) boardAnalystRequests.delete(ticker);
+    if (getMarketInsightsTicker() === ticker) renderBoardAnalystConsensus(ticker);
+  });
+}
+
 function renderInsightNotice(message, isError = false) {
   const content = document.getElementById('marketInsightsContent');
   const notice = createInsightElement(
@@ -1109,6 +1328,24 @@ function renderMarketInsightNews(data) {
 
   const list = createInsightElement('div', 'divide-y divide-slate-800/80');
   if (data?.source) list.appendChild(createInsightElement('p', 'pb-2 text-[10px] text-cyan-300', `Source · ${data.source}`));
+  const scoredArticles = validArticles.filter(article => Number.isFinite(article.sentimentScore));
+  if (scoredArticles.length > 0) {
+    const averageScore = scoredArticles.reduce((sum, article) => sum + article.sentimentScore, 0) / scoredArticles.length;
+    const direction = classifySentimentScore(averageScore);
+    const summary = createInsightElement('div', 'mb-2 flex flex-wrap items-center gap-2');
+    summary.append(
+      createInsightElement('span', 'text-[10px] text-slate-400', `News sentiment · ${scoredArticles.length} scored stories`),
+      sentimentBadge(direction, `${sentimentLabel(direction)} · ${averageScore.toFixed(2)}`)
+    );
+    list.prepend(summary);
+  } else {
+    const summary = createInsightElement('div', 'mb-2 flex flex-wrap items-center gap-2');
+    summary.append(
+      createInsightElement('span', 'text-[10px] text-slate-400', 'News sentiment'),
+      sentimentBadge('unknown', 'Not provided by source')
+    );
+    list.prepend(summary);
+  }
   validArticles.forEach(article => {
     const item = createInsightElement('article', 'py-3 first:pt-0 last:pb-0');
     const meta = createInsightElement('div', 'mb-1 flex flex-wrap gap-x-2 text-[10px] text-slate-500');
@@ -1116,6 +1353,19 @@ function renderMarketInsightNews(data) {
       createInsightElement('span', '', article.source || 'News'),
       createInsightElement('span', '', Number(article.datetime) > 0 ? formatInsightDate(Number(article.datetime) * 1000) : 'Date unavailable')
     );
+    if (typeof article.sentimentLabel === 'string') {
+      const normalized = article.sentimentLabel.toLowerCase();
+      const direction = normalized.includes('bullish')
+        ? 'bullish'
+        : normalized.includes('bearish')
+          ? 'bearish'
+          : normalized.includes('neutral')
+            ? 'neutral'
+            : 'unknown';
+      meta.appendChild(sentimentBadge(direction, article.sentimentLabel));
+    } else {
+      meta.appendChild(sentimentBadge('unknown', 'No sentiment'));
+    }
     const link = createInsightElement('a', 'font-semibold text-slate-100 hover:text-cyan-300');
     link.textContent = article.headline;
     try {
@@ -1223,6 +1473,36 @@ function renderMarketInsightFundamentals(result) {
     count += 1;
   });
   if (count > 0) root.appendChild(grid);
+  const growthValues = overview
+    ? [Number(overview.QuarterlyRevenueGrowthYOY), Number(overview.QuarterlyEarningsGrowthYOY)]
+    : [Number(metrics.revenueGrowthTTMYoy), Number(metrics.epsGrowthTTMYoy)]
+      .filter(Number.isFinite)
+      .map(value => value / 100);
+  if (growthValues.some(Number.isFinite)) {
+    const growthSentiment = summarizeGrowth(growthValues);
+    root.appendChild(createInsightElement(
+      'p',
+      'flex flex-wrap items-center gap-2 text-[10px] text-slate-400',
+      ''
+    ));
+    const growthSummary = root.lastElementChild;
+    growthSummary.append(
+      createInsightElement('span', '', 'Reported YoY revenue / earnings growth'),
+      sentimentBadge(growthSentiment, `${sentimentLabel(growthSentiment)} growth`)
+    );
+  }
+  const currentPrice = Number(state.positions[insightTicker]?.currentPrice);
+  const high52Week = Number(metrics['52WeekHigh']);
+  const low52Week = Number(metrics['52WeekLow']);
+  if (Number.isFinite(currentPrice) && high52Week > low52Week) {
+    const rangePosition = (currentPrice - low52Week) / (high52Week - low52Week);
+    const rangeRow = createInsightElement('p', 'flex flex-wrap items-center gap-2 text-[10px] text-slate-400');
+    rangeRow.append(
+      createInsightElement('span', '', `52-week range position · ${Math.max(0, Math.min(100, rangePosition * 100)).toFixed(0)}%`),
+      sentimentBadge(rangePosition > 0.6 ? 'bullish' : rangePosition < 0.4 ? 'bearish' : 'neutral', 'Price position')
+    );
+    root.appendChild(rangeRow);
+  }
   content.replaceChildren(root);
 }
 
@@ -1248,6 +1528,26 @@ function renderMarketInsightEarnings(data) {
     return;
   }
   const list = createInsightElement('div', 'divide-y divide-slate-800/80');
+  const upcoming = sorted.filter(event => !isFiniteQuoteValue(event.epsActual) || !isFiniteQuoteValue(event.epsEstimate)).length;
+  if (upcoming > 0) {
+    list.appendChild(createInsightElement(
+      'p',
+      'pb-2 text-[10px] text-slate-500',
+      `${upcoming} event${upcoming === 1 ? '' : 's'} do not have an actual-vs-estimate sentiment signal yet.`
+    ));
+  }
+  const scoredEvents = sorted.filter(event => isFiniteQuoteValue(event.epsActual) && isFiniteQuoteValue(event.epsEstimate));
+  if (scoredEvents.length > 0) {
+    const beats = scoredEvents.filter(event => event.epsActual > event.epsEstimate).length;
+    const misses = scoredEvents.filter(event => event.epsActual < event.epsEstimate).length;
+    const direction = beats > misses ? 'bullish' : misses > beats ? 'bearish' : 'neutral';
+    const snapshot = createInsightElement('div', 'flex flex-wrap items-center gap-2 pb-2');
+    snapshot.append(
+      createInsightElement('span', 'text-[10px] text-slate-400', `EPS snapshot · ${beats} beat${beats === 1 ? '' : 's'} / ${misses} miss${misses === 1 ? '' : 'es'}`),
+      sentimentBadge(direction, `${sentimentLabel(direction)} earnings`)
+    );
+    list.appendChild(snapshot);
+  }
   list.appendChild(createInsightElement(
     'p',
     'pb-2 text-[10px] text-cyan-300',
@@ -1264,6 +1564,12 @@ function renderMarketInsightEarnings(data) {
     if (isFiniteQuoteValue(event.epsActual)) values.push(`actual ${Number(event.epsActual).toFixed(2)}`);
     if (Number.isFinite(event.surprisePercentage)) values.push(`surprise ${Number(event.surprisePercentage).toFixed(2)}%`);
     if (values.length > 0) row.appendChild(createInsightElement('div', 'col-span-2 text-[10px] text-slate-500', values.join(' · ')));
+    const earningsDirection = isFiniteQuoteValue(event.epsActual) && isFiniteQuoteValue(event.epsEstimate)
+      ? classifyActualVsEstimate(event.epsActual, event.epsEstimate)
+      : 'unknown';
+    if (earningsDirection !== 'unknown') {
+      row.appendChild(sentimentBadge(earningsDirection, event.epsActual > event.epsEstimate ? 'EPS beat' : event.epsActual < event.epsEstimate ? 'EPS miss' : 'In line'));
+    }
     list.appendChild(row);
   });
   content.replaceChildren(list);
@@ -1292,7 +1598,13 @@ function renderMarketInsightAnalysts(result) {
   if (typeof result?.source === 'string') root.appendChild(createInsightElement('p', 'text-[10px] text-cyan-300', `Source · ${result.source}`));
   if (ratingData) {
     const period = latest?.period;
-    root.appendChild(createInsightElement('p', 'text-[10px] text-slate-500', `Recommendation counts${period ? ` · ${formatInsightDate(period)}` : ''}`));
+    const direction = classifyRecommendationCounts(ratingData);
+    const heading = createInsightElement('div', 'flex flex-wrap items-center gap-2');
+    heading.append(
+      createInsightElement('p', 'text-[10px] text-slate-500', `Recommendation counts${period ? ` · ${formatInsightDate(period)}` : ''}`),
+      sentimentBadge(direction, `Consensus · ${sentimentLabel(direction)}`)
+    );
+    root.appendChild(heading);
     const grid = createInsightElement('div', 'grid grid-cols-2 gap-2 sm:grid-cols-5');
     [
       ['Strong buy', ratingData.strongBuy],
@@ -1320,6 +1632,17 @@ function renderMarketInsightAnalysts(result) {
       });
     }
     root.appendChild(grid);
+    const referencePrice = Number(state.positions[insightTicker]?.currentPrice);
+    if (targetPrice !== null && referencePrice > 0) {
+      const upside = ((targetPrice - referencePrice) / referencePrice) * 100;
+      const direction = upside > 1 ? 'bullish' : upside < -1 ? 'bearish' : 'neutral';
+      const targetSummary = createInsightElement('p', 'flex flex-wrap items-center gap-2 text-[10px] text-slate-400');
+      targetSummary.append(
+        createInsightElement('span', '', `Consensus target vs tracked price · ${upside >= 0 ? '+' : ''}${upside.toFixed(2)}%`),
+        sentimentBadge(direction, `Target ${sentimentLabel(direction)}`)
+      );
+      root.appendChild(targetSummary);
+    }
   }
   content.replaceChildren(root);
 }
@@ -1348,6 +1671,10 @@ function renderMarketInsightAccessError(section, error, ticker) {
       'Endpoint access varies by Finnhub plan and exchange. Check your account entitlements or try again after updating your key.'
     ));
   }
+  const retry = createInsightElement('button', 'mt-1 rounded border border-rose-800/70 bg-rose-950/30 px-2.5 py-1.5 text-[10px] font-bold text-rose-200 transition hover:bg-rose-900/50', 'Retry this section');
+  retry.type = 'button';
+  retry.addEventListener('click', refreshMarketInsight);
+  root.appendChild(retry);
   content.replaceChildren(root);
 }
 
@@ -1428,7 +1755,14 @@ async function loadMarketInsight(section, force = false) {
   refreshButton.disabled = true;
   content.setAttribute('aria-busy', 'true');
   setMarketInsightsStatus(`Loading ${section}…`, 'loading');
-  content.replaceChildren(createInsightElement('p', 'animate-pulse text-cyan-300', `Loading ${section} for ${ticker}…`));
+  const loading = createInsightElement('div', 'space-y-3', '');
+  loading.setAttribute('aria-label', `Loading ${section} for ${ticker}`);
+  loading.append(
+    createInsightElement('div', 'h-3 w-40 animate-pulse rounded bg-slate-800'),
+    createInsightElement('div', 'h-3 w-3/4 animate-pulse rounded bg-slate-800'),
+    createInsightElement('div', 'h-3 w-1/2 animate-pulse rounded bg-slate-800')
+  );
+  content.replaceChildren(loading);
   const now = new Date();
   const to = now.toISOString().slice(0, 10);
   const fromDate = new Date(now);
@@ -1507,6 +1841,22 @@ async function loadMarketInsight(section, force = false) {
 
 function refreshMarketInsight() {
   return loadMarketInsight(activeInsightSection, true);
+}
+
+function handleMarketInsightsTabKeydown(event) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  const tabs = Array.from(document.querySelectorAll('#marketInsightsTabs [role="tab"]'));
+  const currentIndex = tabs.indexOf(event.target);
+  if (currentIndex < 0 || tabs.length === 0) return;
+  event.preventDefault();
+  const nextIndex = event.key === 'Home'
+    ? 0
+    : event.key === 'End'
+      ? tabs.length - 1
+      : (currentIndex + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length;
+  const nextTab = tabs[nextIndex];
+  nextTab.focus();
+  loadMarketInsight(nextTab.dataset.insight);
 }
 
 function recordTrackedPrice(ticker, price, sourceName, updatedAt = null, quoteDetails = null) {
@@ -1685,6 +2035,17 @@ function renderCombinedView(tickers) {
   document.getElementById('boardQuoteMeta').innerText = latestQuote
     ? `Latest portfolio quote · ${formatQuoteMetadata(latestQuote)}`
     : 'No live quotes fetched for margin positions';
+  const portfolioHoldings = [
+    ...Object.values(state.positions),
+    ...(state.cashCushion?.holdings || [])
+  ];
+  const dailySummary = summarizeDailyQuote(portfolioHoldings);
+  setBoardDailyMove(
+    dailySummary.coverage ? dailySummary.change : Number.NaN,
+    dailySummary.coverage,
+    dailySummary.total
+  );
+  renderBoardAnalystConsensus(tickers[0]);
 
   const totalAccountEquity = (totalMarketValue + cushionTotal) - totalDebt;
   const totalAccountAssets = totalMarketValue + cushionTotal;
@@ -1734,6 +2095,16 @@ function renderSingleAssetView(pos) {
   const dailyQuoteLabel = createDailyQuoteLabel(pos.quoteDetails);
   boardDailyQuote.textContent = dailyQuoteLabel?.textContent || '';
   boardDailyQuote.className = dailyQuoteLabel?.className || 'block text-[10px] text-slate-500';
+  const dailyChange = Number.isFinite(pos.quoteDetails?.change)
+    ? pos.quoteDetails.change * pos.shares
+    : Number.NaN;
+  setBoardDailyMove(
+    dailyChange,
+    Number.isFinite(pos.quoteDetails?.change) ? 1 : 0,
+    1,
+    pos.quoteDetails?.changePercent
+  );
+  renderBoardAnalystConsensus(pos.ticker);
   
   const isFullDebt = Math.abs(allocatedDebt - totalAccountDebt) < 0.01;
   document.getElementById('boardMargin').innerText = isFullDebt
@@ -1923,6 +2294,21 @@ async function requestLivePrice(symbol) {
   }
 }
 
+async function fetchQuoteProvider(url) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), QUOTE_PROVIDER_TIMEOUT_MS);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`Request timed out after ${QUOTE_PROVIDER_TIMEOUT_MS / 1000} seconds.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function fetchLivePriceFromProviders(symbol) {
   symbol = symbol.toUpperCase();
   let price = null;
@@ -1938,7 +2324,7 @@ async function fetchLivePriceFromProviders(symbol) {
 
   if (finnhubKey) {
     try {
-      const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(finnhubSymbol)}&token=${encodeURIComponent(finnhubKey)}`);
+      const res = await fetchQuoteProvider(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(finnhubSymbol)}&token=${encodeURIComponent(finnhubKey)}`);
       if (res.ok) {
         const data = await res.json();
         if (data && data.c && Number(data.c) > 0) {
@@ -1977,7 +2363,7 @@ async function fetchLivePriceFromProviders(symbol) {
       const stooqUrl = `https://stooq.com/q/l/?s=${encodeURIComponent(stooqSymbol.toLowerCase())}&f=sd2t2ohlcv&h&e=csv`;
       const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(stooqUrl)}`;
       
-      const res = await fetch(proxyUrl);
+      const res = await fetchQuoteProvider(proxyUrl);
       if (res.ok) {
         const json = await res.json();
         if (json && json.contents) {
@@ -2096,29 +2482,37 @@ function exportBackupJSON() {
 }
 
 async function importBackupJSON(event) {
-  const file = event.target.files[0];
+  const input = event.target;
+  const file = input.files[0];
   if (!file) return;
+  input.value = '';
 
-  const reader = new FileReader();
-  reader.onload = async (e) => {
-    try {
-      const importedState = JSON.parse(e.target.result);
-      if (importedState && typeof importedState === 'object') {
-        state = normalizePortfolioState(importedState);
-        
-        localStorage.setItem('margin_portfolio_state_dynamic_v2', JSON.stringify(state));
-        await pushStateToGist(true);
-        renderBoard();
-        logTerminal(`[Backup Import]: Successfully imported ${file.name}. GitHub Gist overwritten.`);
-      } else {
-        throw new Error("Invalid structure");
-      }
-    } catch (err) {
-      logTerminal(`[Backup Error]: Could not parse backup file (${err.message}).`);
+  try {
+    const parsed = JSON.parse(await file.text());
+    const importedState = normalizePortfolioBackup(parsed);
+    if (!confirm(`Replace this browser's portfolio with "${file.name}"? If Gist sync is configured, the imported portfolio will replace its remote copy too.`)) {
+      logTerminal('[Backup Import]: Import cancelled; the current portfolio was not changed.');
+      return;
     }
-  };
-  reader.readAsText(file);
-  event.target.value = '';
+
+    importedState.lastUpdated = Date.now();
+    const previousState = state;
+    state = importedState;
+    try {
+      saveState();
+    } catch (error) {
+      state = previousState;
+      throw error;
+    }
+    await pushStateToGist(true);
+    renderBoard();
+    logTerminal(`[Backup Import]: Imported ${file.name} into this browser. Check Gist status for cloud sync results.`);
+    showToast('Backup imported locally. Check Gist status for cloud sync.', 'success');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logTerminal(`[Backup Error]: Could not import backup (${message}).`);
+    showToast(`Backup import failed: ${message}`, 'error');
+  }
 }
 
 function runLadderSimulation(data) {
@@ -2665,12 +3059,17 @@ async function executeCommand() {
       activeView: state.activeView,
       today: new Date().toISOString().split('T')[0]
     });
-    const activeModels = await listGeminiModels(apiKey);
+    let activeModels = await listGeminiModels(apiKey);
     document.getElementById('aiStatus').innerText = "PARSING...";
     let lastError = null;
     let success = false;
+    const attemptedModels = new Set();
+    let refreshedModelCatalog = false;
 
-    for (const model of activeModels) {
+    while (true) {
+      const model = activeModels.find(candidate => !attemptedModels.has(candidate));
+      if (!model) break;
+      attemptedModels.add(model);
       try {
         const rawText = await generateIntentText(apiKey, model, prompt);
         const parsed = parseAiIntent(rawText);
@@ -2702,6 +3101,16 @@ async function executeCommand() {
       } catch (err) {
         lastError = err;
         if (shouldTryAnotherGeminiModel(err)) {
+          if (err instanceof GeminiApiError && err.status === 404 && !refreshedModelCatalog) {
+            refreshedModelCatalog = true;
+            try {
+              activeModels = await listGeminiModels(apiKey, fetch, Date.now(), true);
+            } catch (discoveryError) {
+              lastError = new Error(
+                `${err.message} Refreshing the Gemini model list also failed: ${discoveryError instanceof Error ? discoveryError.message : String(discoveryError)}`
+              );
+            }
+          }
           continue;
         }
         throw err;
@@ -2740,6 +3149,7 @@ window.onload = async () => {
   document.getElementById('quoteMappingTickerInput').addEventListener('change', event => {
     populateQuoteSymbolMapping(event.target.value);
   });
+  document.getElementById('marketInsightsTabs').addEventListener('keydown', handleMarketInsightsTabKeydown);
   updateHeaderCredentialsVisibility();
   await refreshAllLivePrices();
 };
