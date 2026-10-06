@@ -14,6 +14,10 @@ import {
 } from './src/features/quotes/alphaVantageAnalysts.ts';
 import { fetchTwelveDataQuote } from './src/features/quotes/twelveData.ts';
 import {
+  fetchRapidApiYahooAnalystTarget,
+  fetchRapidApiYahooQuote
+} from './src/features/quotes/rapidApiYahoo.ts';
+import {
   classifyActualVsEstimate,
   classifyRecommendationCounts,
   classifySentimentScore,
@@ -255,6 +259,9 @@ async function loadSavedState() {
   const savedTwelveData = localStorage.getItem('twelve_data_api_key');
   if (savedTwelveData) document.getElementById('twelveDataKeyInput').value = savedTwelveData;
 
+  const savedRapidApi = localStorage.getItem('rapidapi_yahoo_key');
+  if (savedRapidApi) document.getElementById('rapidApiKeyInput').value = savedRapidApi;
+
   localStorage.removeItem('fmp_api_key');
 
   const savedGistId = localStorage.getItem('github_gist_id');
@@ -286,7 +293,7 @@ async function loadSavedState() {
 let headerCredentialsHidden = false;
 
 function updateHeaderCredentialsVisibility() {
-  const inputIds = ['apiKeyInput', 'finnhubKeyInput', 'alphaVantageKeyInput', 'twelveDataKeyInput', 'gistIdInput', 'githubTokenInput'];
+  const inputIds = ['apiKeyInput', 'finnhubKeyInput', 'alphaVantageKeyInput', 'twelveDataKeyInput', 'rapidApiKeyInput', 'gistIdInput', 'githubTokenInput'];
   const inputs = inputIds.map(id => document.getElementById(id));
   const allFieldsFilled = ['apiKeyInput', 'finnhubKeyInput', 'gistIdInput', 'githubTokenInput']
     .every(id => document.getElementById(id).value.trim().length > 0);
@@ -348,6 +355,9 @@ async function saveApiKeys() {
   const twelveDataKey = document.getElementById('twelveDataKeyInput').value.trim();
   if (twelveDataKey) localStorage.setItem('twelve_data_api_key', twelveDataKey);
   else localStorage.removeItem('twelve_data_api_key');
+  const rapidApiKey = document.getElementById('rapidApiKeyInput').value.trim();
+  if (rapidApiKey) localStorage.setItem('rapidapi_yahoo_key', rapidApiKey);
+  else localStorage.removeItem('rapidapi_yahoo_key');
   renderBoardAnalystConsensus(getMarketInsightsTicker(), true);
 
   const rawGist = document.getElementById('gistIdInput').value.trim();
@@ -1166,9 +1176,71 @@ function getAnalystTargetPrice(result) {
   return values.find(value => typeof value === 'number' && Number.isFinite(value) && value > 0);
 }
 
+async function testRapidApiYahooTarget() {
+  const ticker = getMarketInsightsTicker();
+  const keyInput = document.getElementById('rapidApiKeyInput');
+  const apiKey = keyInput.value.trim();
+  const container = document.getElementById('boardAnalystConsensus');
+  if (!ticker) {
+    showToast('Select a margin position before testing Yahoo Finance.', 'warning');
+    return;
+  }
+  if (!apiKey) {
+    if (container) {
+      container.textContent = 'RapidAPI key required · enter it above and test again';
+      container.title = 'A RapidAPI key is required for the apidojo Yahoo Finance API.';
+      container.className = 'rounded border border-amber-800 bg-amber-950/30 px-2.5 py-1 text-[10px] font-semibold text-amber-300';
+    }
+    return;
+  }
+
+  localStorage.setItem('rapidapi_yahoo_key', apiKey);
+  if (container) {
+    container.textContent = `Testing Yahoo Finance via RapidAPI · ${ticker}…`;
+    container.removeAttribute('title');
+    container.className = 'rounded border border-slate-700 bg-slate-900 px-2.5 py-1 text-[10px] font-semibold text-slate-400';
+  }
+
+  try {
+    const result = await fetchRapidApiYahooAnalystTarget(apiKey, ticker);
+    if (localStorage.getItem('rapidapi_yahoo_key') !== apiKey) return;
+    const credentials = [
+      localStorage.getItem('finnhub_api_key') || '',
+      localStorage.getItem('alpha_vantage_api_key') || '',
+      apiKey
+    ].join('|');
+    boardAnalystSnapshots.set(ticker, { ...result, credentials, fetchedAt: Date.now() });
+    boardAnalystErrors.delete(ticker);
+    renderBoardAnalystConsensus(ticker);
+    showToast(`${ticker} Yahoo analyst target loaded from RapidAPI.`, 'success');
+  } catch (error) {
+    if (localStorage.getItem('rapidapi_yahoo_key') !== apiKey) return;
+    const message = error instanceof Error ? error.message : String(error);
+    const credentials = [
+      localStorage.getItem('finnhub_api_key') || '',
+      localStorage.getItem('alpha_vantage_api_key') || '',
+      apiKey
+    ].join('|');
+    boardAnalystErrors.set(ticker, {
+      credentials,
+      failedAt: Date.now(),
+      message,
+      summary: `RapidAPI Yahoo Finance: ${message}`
+    });
+    if (container) {
+      container.textContent = `RapidAPI request failed · ${message}`;
+      container.title = message;
+      container.className = 'max-w-xl rounded border border-amber-800 bg-amber-950/30 px-2.5 py-1 text-[10px] font-semibold text-amber-300';
+    }
+    logTerminal(`[RapidAPI Yahoo Finance]: ${ticker} target request failed: ${message}`);
+    showToast('RapidAPI Yahoo target request failed; see the board message and terminal.', 'error');
+  }
+}
+
 async function fetchBoardAnalystTarget(ticker) {
   const finnhubKey = localStorage.getItem('finnhub_api_key') || '';
   const alphaVantageKey = localStorage.getItem('alpha_vantage_api_key') || '';
+  const rapidApiKey = localStorage.getItem('rapidapi_yahoo_key') || '';
   const failures = [];
   const restrictionKey = `${FINNHUB_ANALYST_RESTRICTED_PREFIX}${ticker}`;
   const finnhubRestricted = sessionStorage.getItem(restrictionKey) === 'true';
@@ -1201,8 +1273,16 @@ async function fetchBoardAnalystTarget(ticker) {
     }
   }
 
+  if (rapidApiKey) {
+    try {
+      return await fetchRapidApiYahooAnalystTarget(rapidApiKey, ticker);
+    } catch (error) {
+      failures.push(`Yahoo Finance via RapidAPI: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   if (failures.length === 0) {
-    throw new Error('Add a Finnhub or Alpha Vantage API key to load analyst consensus.');
+    throw new Error('Add a Finnhub, Alpha Vantage, or RapidAPI key to load analyst consensus.');
   }
   throw new Error(failures.join(' '));
 }
@@ -1222,11 +1302,17 @@ function renderBoardAnalystConsensus(ticker, force = false) {
 
   const finnhubKey = localStorage.getItem('finnhub_api_key') || '';
   const alphaVantageKey = localStorage.getItem('alpha_vantage_api_key') || '';
-  const credentials = `${finnhubKey}|${alphaVantageKey}`;
+  const rapidApiKey = localStorage.getItem('rapidapi_yahoo_key') || '';
+  const credentials = `${finnhubKey}|${alphaVantageKey}|${rapidApiKey}`;
   const now = Date.now();
   const snapshot = boardAnalystSnapshots.get(ticker);
   const error = boardAnalystErrors.get(ticker);
   const currentPrice = Number(state.positions[ticker].currentPrice);
+
+  if (!finnhubKey && !alphaVantageKey && !rapidApiKey) {
+    hideConsensus();
+    return;
+  }
 
   if (!force && snapshot?.credentials === credentials && now - snapshot.fetchedAt < BOARD_ANALYST_CACHE_TTL_MS) {
     const upside = calculateTargetUpsidePercent(snapshot.targetPrice, currentPrice);
@@ -1236,44 +1322,50 @@ function renderBoardAnalystConsensus(ticker, force = false) {
         : upside < 0
           ? 'border-rose-800 bg-rose-950/40 text-rose-300'
           : 'border-slate-700 bg-slate-900 text-slate-300';
-      container.textContent = `${ticker} analyst consensus · $${formatUSD(snapshot.targetPrice)} · ${upside >= 0 ? '+' : ''}${upside.toFixed(2)}%`;
-      container.title = `Analyst consensus from ${snapshot.source}: $${formatUSD(snapshot.targetPrice)} target versus current price $${formatUSD(currentPrice)}.`;
+      const isRapidApiAverage = snapshot.basis?.startsWith('average of ') ?? false;
+      const shortSource = isRapidApiAverage ? 'Yahoo avg' : snapshot.source;
+      const reportCount = isRapidApiAverage ? ` · ${snapshot.basis.match(/\d+/)?.[0]} reports` : '';
+      container.textContent = `${shortSource} · $${formatUSD(snapshot.targetPrice)}${reportCount} · ${upside >= 0 ? '+' : ''}${upside.toFixed(2)}%`;
+      container.title = `Target from ${snapshot.source}${snapshot.basis ? ` (${snapshot.basis} from the past year)` : ''}: $${formatUSD(snapshot.targetPrice)} versus current price $${formatUSD(currentPrice)}.`;
       container.className = `rounded border px-2.5 py-1 text-[10px] font-semibold ${color}`;
     } else {
-      container.textContent = `${ticker} analyst consensus · $${formatUSD(snapshot.targetPrice)} · current price unavailable`;
-      container.title = `Consensus price target from ${snapshot.source}.`;
+      container.textContent = `${snapshot.source} price target · $${formatUSD(snapshot.targetPrice)}${snapshot.basis ? ` · ${snapshot.basis}` : ''} · current price unavailable`;
+      container.title = `Price target from ${snapshot.source}${snapshot.basis ? ` (${snapshot.basis})` : ''}.`;
       container.className = 'rounded border border-slate-700 bg-slate-900 px-2.5 py-1 text-[10px] font-semibold text-slate-300';
     }
     return;
   }
 
   if (!force && error?.credentials === credentials && now - error.failedAt < BOARD_ANALYST_RETRY_MS) {
-    hideConsensus();
-    return;
-  }
-
-  if (!finnhubKey && !alphaVantageKey) {
-    hideConsensus();
+    container.textContent = `Analyst target unavailable · ${error.summary}`;
+    container.title = error.message;
+    container.className = 'rounded border border-amber-800 bg-amber-950/30 px-2.5 py-1 text-[10px] font-semibold text-amber-300';
     return;
   }
 
   const existingRequest = boardAnalystRequests.get(ticker);
   if (existingRequest?.credentials === credentials) {
-    hideConsensus();
+    container.textContent = 'Checking analyst target providers…';
+    container.removeAttribute('title');
+    container.className = 'rounded border border-slate-700 bg-slate-900 px-2.5 py-1 text-[10px] font-semibold text-slate-400';
     return;
   }
 
-  hideConsensus();
+  container.textContent = 'Checking analyst target providers…';
+  container.removeAttribute('title');
+  container.className = 'rounded border border-slate-700 bg-slate-900 px-2.5 py-1 text-[10px] font-semibold text-slate-400';
   const request = { credentials };
   boardAnalystRequests.set(ticker, request);
   fetchBoardAnalystTarget(ticker).then(result => {
     if (localStorage.getItem('finnhub_api_key') !== finnhubKey ||
-        localStorage.getItem('alpha_vantage_api_key') !== alphaVantageKey) return;
+        localStorage.getItem('alpha_vantage_api_key') !== alphaVantageKey ||
+        localStorage.getItem('rapidapi_yahoo_key') !== rapidApiKey) return;
     boardAnalystSnapshots.set(ticker, { ...result, credentials, fetchedAt: Date.now() });
     boardAnalystErrors.delete(ticker);
   }).catch(requestError => {
     if (localStorage.getItem('finnhub_api_key') !== finnhubKey ||
-        localStorage.getItem('alpha_vantage_api_key') !== alphaVantageKey) return;
+        localStorage.getItem('alpha_vantage_api_key') !== alphaVantageKey ||
+        localStorage.getItem('rapidapi_yahoo_key') !== rapidApiKey) return;
     const message = requestError instanceof Error ? requestError.message : String(requestError);
     const summaryParts = [];
     if (message.includes('Finnhub analyst price targets are restricted')) {
@@ -1285,6 +1377,11 @@ function renderBoardAnalystConsensus(ticker, force = false) {
       summaryParts.push('Alpha Vantage returned no target');
     } else if (!alphaVantageKey) {
       summaryParts.push('add Alpha Vantage key for fallback');
+    }
+    if (message.includes('no analyst price target')) {
+      summaryParts.push('RapidAPI returned no analyst target');
+    } else if (message.includes('RapidAPI')) {
+      summaryParts.push('RapidAPI Yahoo Finance unavailable');
     }
     const summary = summaryParts.join(' · ') || 'provider access or data unavailable';
     boardAnalystErrors.set(ticker, { credentials, failedAt: Date.now(), message, summary });
@@ -1358,13 +1455,6 @@ function renderMarketInsightNews(data) {
       sentimentBadge(direction, `${sentimentLabel(direction)} · ${averageScore.toFixed(2)}`)
     );
     list.prepend(summary);
-  } else {
-    const summary = createInsightElement('div', 'mb-2 flex flex-wrap items-center gap-2');
-    summary.append(
-      createInsightElement('span', 'text-[10px] text-slate-400', 'News sentiment'),
-      sentimentBadge('unknown', 'Not provided by source')
-    );
-    list.prepend(summary);
   }
   validArticles.forEach(article => {
     const item = createInsightElement('article', 'py-3 first:pt-0 last:pb-0');
@@ -1383,8 +1473,6 @@ function renderMarketInsightNews(data) {
             ? 'neutral'
             : 'unknown';
       meta.appendChild(sentimentBadge(direction, article.sentimentLabel));
-    } else {
-      meta.appendChild(sentimentBadge('unknown', 'No sentiment'));
     }
     const link = createInsightElement('a', 'font-semibold text-slate-100 hover:text-cyan-300');
     link.textContent = article.headline;
@@ -1640,7 +1728,7 @@ function renderMarketInsightAnalysts(result) {
   if (hasTargets) {
     root.appendChild(createInsightElement('p', 'pt-1 text-[10px] text-slate-500', `Analyst price target${targets.lastUpdated ? ` · Updated ${formatInsightDate(targets.lastUpdated)}` : ''}`));
     const grid = createInsightElement('div', `grid grid-cols-2 gap-2 ${targetPrice !== null ? 'sm:grid-cols-1' : 'sm:grid-cols-4'}`);
-    if (targetPrice !== null) appendInsightMetric(grid, 'Consensus target', `$${formatUSD(targetPrice)}`);
+    if (targetPrice !== null)     appendInsightMetric(grid, result?.basis ? 'Average analyst target' : 'Consensus target', `$${formatUSD(targetPrice)}`);
     else {
       [
         ['Low', 'targetLow'],
@@ -1658,7 +1746,7 @@ function renderMarketInsightAnalysts(result) {
       const direction = upside > 1 ? 'bullish' : upside < -1 ? 'bearish' : 'neutral';
       const targetSummary = createInsightElement('p', 'flex flex-wrap items-center gap-2 text-[10px] text-slate-400');
       targetSummary.append(
-        createInsightElement('span', '', `Consensus target vs tracked price · ${upside >= 0 ? '+' : ''}${upside.toFixed(2)}%`),
+        createInsightElement('span', '', `${result?.basis ? 'Average target' : 'Consensus target'} vs tracked price · ${upside >= 0 ? '+' : ''}${upside.toFixed(2)}%`),
         sentimentBadge(direction, `Target ${sentimentLabel(direction)}`)
       );
       root.appendChild(targetSummary);
@@ -1721,6 +1809,26 @@ function hasMarketInsightData(section, result) {
   );
 }
 
+function hasAnalystPriceTarget(result) {
+  return Boolean(
+    result?.targetPrice ||
+    result?.targets?.targetMean ||
+    result?.targets?.targetMedian ||
+    result?.targets?.targetHigh ||
+    result?.targets?.targetLow
+  );
+}
+
+async function addRapidApiAnalystTarget(result, ticker, apiKey) {
+  if (!apiKey || hasAnalystPriceTarget(result)) return result;
+  const target = await fetchRapidApiYahooAnalystTarget(apiKey, ticker);
+  return {
+    ...result,
+    ...target,
+    source: result?.source ? `${result.source} + ${target.source}` : target.source
+  };
+}
+
 async function fetchAlphaVantageInsight(section, apiKey, ticker, force) {
   if (section === 'news') {
     const articles = await fetchAlphaVantageNews(apiKey, ticker, { force });
@@ -1764,9 +1872,10 @@ async function loadMarketInsight(section, force = false) {
 
   const finnhubKey = localStorage.getItem('finnhub_api_key') || '';
   const alphaVantageKey = localStorage.getItem('alpha_vantage_api_key') || '';
-  if (!finnhubKey && !alphaVantageKey) {
+  const rapidApiKey = localStorage.getItem('rapidapi_yahoo_key') || '';
+  if (!finnhubKey && !alphaVantageKey && !(section === 'analysts' && rapidApiKey)) {
     setMarketInsightsStatus('Needs API key', 'warning');
-    renderInsightNotice('Add a Finnhub or Alpha Vantage API key in the header credentials to load company insights.', true);
+    renderInsightNotice('Add a Finnhub or Alpha Vantage API key to load company insights; analyst targets can also use a RapidAPI key.', true);
     return;
   }
 
@@ -1822,30 +1931,60 @@ async function loadMarketInsight(section, force = false) {
       if (!hasMarketInsightData(section, result)) {
         throw new Error(`Finnhub returned no ${section} data for ${ticker}.`);
       }
+      if (section === 'analysts' && rapidApiKey && !hasAnalystPriceTarget(result)) {
+        try {
+          result = await addRapidApiAnalystTarget(result, ticker, rapidApiKey);
+        } catch (error) {
+          logTerminal(`[Yahoo Finance via RapidAPI]: Analyst-target fallback failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
       if (requestId !== insightRequestId || ticker !== getMarketInsightsTicker()) return;
       if (section === 'news') renderMarketInsightNews(result);
       else if (section === 'fundamentals') renderMarketInsightFundamentals(result);
       else if (section === 'earnings') renderMarketInsightEarnings(result);
       else renderMarketInsightAnalysts(result);
-      setMarketInsightsStatus(`Finnhub · updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'success');
+      setMarketInsightsStatus(`${result?.source || 'Finnhub'} · updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'success');
     } catch (error) {
       let fallbackFailure = error;
       try {
         if (!alphaVantageKey) throw error;
-        const result = await fetchAlphaVantageInsight(section, alphaVantageKey, ticker, force);
+        let result = await fetchAlphaVantageInsight(section, alphaVantageKey, ticker, force);
         if (!hasMarketInsightData(section, result)) {
           throw new Error(`Alpha Vantage returned no ${section} data for ${ticker}.`);
+        }
+        if (section === 'analysts' && rapidApiKey && !hasAnalystPriceTarget(result)) {
+          try {
+            result = await addRapidApiAnalystTarget(result, ticker, rapidApiKey);
+          } catch (error) {
+            logTerminal(`[Yahoo Finance via RapidAPI]: Analyst-target fallback failed: ${error instanceof Error ? error.message : String(error)}`);
+          }
         }
         if (requestId !== insightRequestId || ticker !== getMarketInsightsTicker()) return;
         if (section === 'news') renderMarketInsightNews(result);
         else if (section === 'fundamentals') renderMarketInsightFundamentals(result);
         else if (section === 'earnings') renderMarketInsightEarnings(result);
         else renderMarketInsightAnalysts(result);
-        setMarketInsightsStatus(`Alpha Vantage · updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'success');
+        setMarketInsightsStatus(`${result?.source || 'Alpha Vantage'} · updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'success');
       } catch (fallbackError) {
         fallbackFailure = new Error(
           `Finnhub failed: ${error instanceof Error ? error.message : String(error)}. Alpha Vantage fallback failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}.`
         );
+      }
+      if (section === 'analysts' && rapidApiKey) {
+        try {
+          const result = await addRapidApiAnalystTarget({}, ticker, rapidApiKey);
+          if (!hasMarketInsightData(section, result)) {
+            throw new Error(`Yahoo Finance via RapidAPI returned no analyst target data for ${ticker}.`);
+          }
+          if (requestId !== insightRequestId || ticker !== getMarketInsightsTicker()) return;
+          renderMarketInsightAnalysts(result);
+          setMarketInsightsStatus(`Yahoo Finance via RapidAPI · updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'success');
+          return;
+        } catch (rapidApiError) {
+          fallbackFailure = new Error(
+            `${fallbackFailure instanceof Error ? fallbackFailure.message : String(fallbackFailure)} Yahoo Finance via RapidAPI fallback failed: ${rapidApiError instanceof Error ? rapidApiError.message : String(rapidApiError)}.`
+          );
+        }
       }
       throw fallbackFailure;
     }
@@ -2356,6 +2495,7 @@ async function fetchLivePriceFromProviders(symbol) {
   const finnhubKey = localStorage.getItem('finnhub_api_key');
   const alphaVantageKey = localStorage.getItem('alpha_vantage_api_key') || '';
   const twelveDataKey = localStorage.getItem('twelve_data_api_key') || '';
+  const rapidApiKey = localStorage.getItem('rapidapi_yahoo_key') || '';
 
   if (finnhubKey) {
     try {
@@ -2406,6 +2546,22 @@ async function fetchLivePriceFromProviders(symbol) {
       });
     } catch (error) {
       providerErrors.push(`Alpha Vantage: ${error.message}`);
+    }
+  }
+
+  if (!price && rapidApiKey) {
+    try {
+      const quote = await fetchRapidApiYahooQuote(rapidApiKey, symbol);
+      price = quote.price;
+      sourceName = `Yahoo Finance via RapidAPI · ${symbol}`;
+      quoteDetails = parseFinnhubQuoteDetails({
+        d: quote.change,
+        dp: quote.changePercent,
+        h: quote.high,
+        l: quote.low
+      });
+    } catch (error) {
+      providerErrors.push(`Yahoo Finance via RapidAPI: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -3180,7 +3336,7 @@ async function executeCommand() {
 window.onload = async () => {
   await loadSavedState();
   headerCredentialsHidden = localStorage.getItem('header_credentials_hidden') === 'true';
-  ['apiKeyInput', 'finnhubKeyInput', 'alphaVantageKeyInput', 'twelveDataKeyInput', 'gistIdInput', 'githubTokenInput'].forEach(id => {
+  ['apiKeyInput', 'finnhubKeyInput', 'alphaVantageKeyInput', 'twelveDataKeyInput', 'rapidApiKeyInput', 'gistIdInput', 'githubTokenInput'].forEach(id => {
     document.getElementById(id).addEventListener('input', updateHeaderCredentialsVisibility);
   });
   const quoteRefreshInterval = document.getElementById('quoteRefreshInterval');
@@ -3216,6 +3372,7 @@ Object.assign(window, {
   resetToBlankState,
   saveApiKeys,
   saveCurrentBalanceFromInput,
+  testRapidApiYahooTarget,
   toggleMarketInsights,
   toggleHeaderCredentialsVisibility
 });

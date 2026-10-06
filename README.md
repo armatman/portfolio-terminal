@@ -90,10 +90,11 @@ Enter keys in the header and click **Save**. The app calls providers directly fr
 | Finnhub | Primary live quote source; company news, fundamentals, earnings, analyst insights, and board analyst price targets | Some endpoints or symbols may be restricted by plan. A `403` for analyst targets means that endpoint is not available to the configured account. |
 | Twelve Data | Quote fallback after Finnhub | Its analyst price-target endpoint is not available on the free plan, so the app does not request it. |
 | Alpha Vantage | Quote fallback and insights fallback, including available profile/fundamental, news, earnings, and analyst fields | The free plan has historically had a low daily request allowance; limits and endpoints can change. |
+| Yahoo Finance via RapidAPI | Live quote fallback through `/stock/v2/get-summary`; analyst-target fallback using `/stock/v3/get-insights`, then `/stock/get-company-outlook` if insights has no target | Uses provider aggregate mean/median when available; otherwise averages valid, dated report targets from the prior 365 days. Requires a RapidAPI key for the `apidojo-yahoo-finance-v1` listing. |
 | Stooq | Last quote fallback where symbol coverage is available | Provider-specific symbols may be needed. |
 | Gemini (Google AI Studio) | Interprets natural-language console requests | The key is needed only for AI interpretation and general AI responses. |
 
-The quote fallback order is **Finnhub → Twelve Data → Alpha Vantage → Stooq**. Analyst targets and insight sections use **Finnhub → Alpha Vantage**. Twelve Data is not queried for analyst targets because that endpoint is not available on its free plan. If analyst consensus is unavailable, check the error tooltip and verify provider endpoint access, symbol coverage, and limits.
+The quote fallback order is **Finnhub → Twelve Data → Alpha Vantage → Yahoo Finance via RapidAPI → Stooq**. Board analyst targets use **Finnhub → Alpha Vantage → Yahoo Finance via RapidAPI**. Market-insights analyst targets also try RapidAPI if Finnhub or Alpha Vantage lacks a target; the other insight sections use Finnhub and Alpha Vantage. Yahoo Finance via RapidAPI requires a key and is subject to the API listing's availability and plan limits. Twelve Data is not queried for analyst targets because that endpoint is not available on its free plan.
 
 Quote and insight data is cached briefly to limit repeat calls. Use the relevant **Refresh** control to request fresh data. A refresh cannot bypass provider permissions, quotas, or symbol coverage.
 
@@ -103,7 +104,7 @@ Create a personal API key through Google AI Studio, enter it in the **Gemini** f
 
 ### Data-provider keys
 
-Finnhub, Twelve Data, and Alpha Vantage keys are stored in this browser's **local storage** until removed or browser data is cleared. They are not included in portfolio backups or Gist synchronization.
+Finnhub, Twelve Data, Alpha Vantage, and RapidAPI keys are stored in this browser's **local storage** until removed or browser data is cleared. They are not included in portfolio backups or Gist synchronization.
 
 ## Optional GitHub Gist sync
 
