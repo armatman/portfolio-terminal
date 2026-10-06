@@ -658,6 +658,58 @@ function setActiveView(view) {
   renderBoard();
 }
 
+function renderConsoleQuickActions() {
+  const container = document.getElementById('consoleQuickActions');
+  container.innerHTML = '';
+
+  const pos = state.positions[state.activeView];
+  const label = document.createElement('span');
+  label.className = 'text-[10px] font-bold uppercase tracking-wider text-slate-500';
+
+  if (!pos) {
+    label.textContent = 'Quick actions';
+    const hint = document.createElement('span');
+    hint.className = 'text-[10px] text-slate-500';
+    hint.textContent = 'Select a margin ticker to use stock shortcuts.';
+    container.append(label, hint);
+    return;
+  }
+
+  label.className = 'text-[10px] font-bold uppercase tracking-wider text-slate-500';
+  label.textContent = `${pos.ticker} · ${formatUSD(pos.shares)} shares`;
+  container.appendChild(label);
+
+  const currentPrice = Number(pos.currentPrice) > 0 ? Number(pos.currentPrice) : null;
+  const priceText = currentPrice ? formatUSD(currentPrice) : '[price]';
+  const actions = [
+    { text: 'Quote', command: `quote ${pos.ticker}`, color: 'text-amber-300 border-amber-900/70 hover:bg-amber-950/50' },
+    { text: 'Buy…', command: `bought [shares] ${pos.ticker} for ${priceText}`, color: 'text-emerald-300 border-emerald-900/70 hover:bg-emerald-950/50' },
+    { text: 'Sell part…', command: `sold [shares] ${pos.ticker} for ${priceText}`, color: 'text-rose-300 border-rose-900/70 hover:bg-rose-950/50' },
+    { text: 'Sell all…', command: `sold all ${pos.ticker} for ${priceText}`, color: 'text-rose-300 border-rose-900/70 hover:bg-rose-950/50' },
+    { text: 'Set target…', command: `set ${pos.ticker} PT to [price]`, color: 'text-cyan-300 border-cyan-900/70 hover:bg-cyan-950/50' }
+  ];
+
+  actions.forEach(action => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `rounded border bg-slate-900 px-2.5 py-1 text-[10px] font-bold transition ${action.color}`;
+    button.textContent = action.text;
+    button.addEventListener('click', () => {
+      const input = document.getElementById('cmdInput');
+      input.value = action.command;
+      input.focus();
+      if (action.command.includes('[')) {
+        const selectionStart = action.command.indexOf('[');
+        const selectionEnd = action.command.indexOf(']', selectionStart) + 1;
+        input.setSelectionRange(selectionStart, selectionEnd);
+      } else {
+        input.setSelectionRange(input.value.length, input.value.length);
+      }
+    });
+    container.appendChild(button);
+  });
+}
+
 function getTotalPortfolioInvested() {
   return Object.values(state.positions).reduce((acc, pos) => {
     return acc + (pos.tranches || []).reduce((sum, tr) => sum + (tr.qty * tr.price), 0);
@@ -912,6 +964,8 @@ function renderBoard() {
     activeDesk = mainDesk;
     activeDeskView = state.activeView;
   }
+
+  renderConsoleQuickActions();
 
   if (activeDeskView !== lastRenderedDeskView) {
     playEntryAnimation(activeDesk, 'ui-view-enter');
