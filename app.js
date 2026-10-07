@@ -409,15 +409,17 @@ function updateHeaderCredentialsVisibility() {
   const saveButton = document.getElementById('saveApiKeysButton');
 
   if (!allFieldsFilled) headerCredentialsHidden = false;
+  
   fields.classList.toggle('hidden', headerCredentialsHidden);
   toggleButton.classList.toggle('hidden', !allFieldsFilled);
   saveButton.classList.toggle('hidden', headerCredentialsHidden);
+  
   toggleButton.textContent = headerCredentialsHidden ? 'Show keys' : 'Hide keys';
   toggleButton.title = headerCredentialsHidden ? 'Show credential inputs' : 'Hide credential inputs';
   toggleButton.setAttribute('aria-expanded', String(!headerCredentialsHidden));
+  
   const actionButtons = toggleButton.parentElement;
-  actionButtons.classList.toggle('ml-auto', !headerCredentialsHidden);
-  actionButtons.classList.toggle('mx-auto', headerCredentialsHidden);
+
   localStorage.setItem('header_credentials_hidden', String(headerCredentialsHidden));
 }
 
