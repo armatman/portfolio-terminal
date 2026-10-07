@@ -397,11 +397,13 @@ async function loadSavedState() {
 
 let headerCredentialsHidden = false;
 
-function updateHeaderCredentialsVisibility() {
-  const inputIds = ['apiKeyInput', 'finnhubKeyInput', 'alphaVantageKeyInput', 'twelveDataKeyInput', 'rapidApiKeyInput', 'gistIdInput', 'githubTokenInput'];
-  const inputs = inputIds.map(id => document.getElementById(id));
-  const allFieldsFilled = ['apiKeyInput', 'finnhubKeyInput', 'gistIdInput', 'githubTokenInput']
+function areHeaderCredentialsConfigured() {
+  return ['apiKeyInput', 'finnhubKeyInput', 'gistIdInput', 'githubTokenInput']
     .every(id => document.getElementById(id).value.trim().length > 0);
+}
+
+function updateHeaderCredentialsVisibility() {
+  const allFieldsFilled = areHeaderCredentialsConfigured();
   const fields = document.getElementById('headerCredentialsFields');
   const toggleButton = document.getElementById('toggleHeaderCredentialsButton');
   const saveButton = document.getElementById('saveApiKeysButton');
@@ -934,6 +936,21 @@ function updateCombinedBreakeven() {
   beEl.innerText = `Combined Breakeven: ${beDays} days (${beDateStr})`;
 }
 
+function createStockPageLink(ticker, provider) {
+  const link = document.createElement('a');
+  const symbol = encodeURIComponent(ticker);
+  link.href = provider === 'Finviz'
+    ? `https://finviz.com/stock?t=${symbol}`
+    : `https://stocktwits.com/symbol/${symbol}`;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.className = 'px-2 py-1 rounded text-[10px] font-bold text-cyan-300 border border-cyan-900/70 hover:bg-slate-800';
+  link.textContent = provider;
+  link.title = `Open ${ticker} on ${provider} in a new tab`;
+  link.setAttribute('aria-label', `Open ${ticker} on ${provider} in a new tab`);
+  return link;
+}
+
 function renderBoard() {
   const tickers = Object.keys(state.positions);
   const tabsContainer = document.getElementById('tickerTabs');
@@ -1025,6 +1042,16 @@ function renderBoard() {
     }
     activeDesk = mainDesk;
     activeDeskView = state.activeView;
+  }
+
+  const activeTicker = state.positions[state.activeView] ? state.activeView : '';
+  const stockPageLinks = document.getElementById('boardExternalLinks');
+  stockPageLinks.replaceChildren();
+  if (activeTicker) {
+    stockPageLinks.append(
+      createStockPageLink(activeTicker, 'Finviz'),
+      createStockPageLink(activeTicker, 'Stocktwits')
+    );
   }
 
   renderConsoleQuickActions();
@@ -1127,7 +1154,7 @@ function renderCashCushionPanel() {
           ? h.quoteDetails.change > 0 ? 'bullish' : h.quoteDetails.change < 0 ? 'bearish' : 'neutral'
           : 'unknown',
         Number.isFinite(h.quoteDetails?.change)
-          ? `${h.quoteDetails.change > 0 ? '↑' : h.quoteDetails.change < 0 ? '↓' : '→'} ${sentimentLabel(h.quoteDetails.change > 0 ? 'bullish' : h.quoteDetails.change < 0 ? 'bearish' : 'neutral')}`
+          ? `${h.quoteDetails.change > 0 ? '↑ Up' : h.quoteDetails.change < 0 ? '↓ Down' : '→ Flat'}`
           : 'No daily signal'
       )
     );
@@ -1183,8 +1210,10 @@ function renderClosedHistoryPanel() {
   const tableBody = document.getElementById('closedTradesTableBody');
   tableBody.innerHTML = '';
 
-  const trades = [...state.closedTrades].sort((a, b) => Number(b.date) - Number(a.date));
-  trades.forEach(trade => {
+  const trades = state.closedTrades
+    .map((trade, index) => ({ trade, index }))
+    .sort((a, b) => Number(b.trade.date) - Number(a.trade.date));
+  trades.forEach(({ trade, index }) => {
     const row = document.createElement('tr');
     row.className = 'border-b border-slate-800/60 text-slate-300';
 
@@ -1211,10 +1240,32 @@ function renderClosedHistoryPanel() {
       row.appendChild(element);
     });
     row.appendChild(netCell);
+    const actionsCell = document.createElement('td');
+    actionsCell.className = 'py-2 px-3 text-right';
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.className = 'rounded border border-slate-700 px-2 py-1 text-[10px] font-semibold text-slate-400 hover:border-rose-800 hover:text-rose-300';
+    deleteButton.textContent = 'Delete';
+    deleteButton.setAttribute('aria-label', `Delete ${trade.ticker || 'unknown'} closed trade from history`);
+    deleteButton.addEventListener('click', () => deleteClosedTrade(index));
+    actionsCell.appendChild(deleteButton);
+    row.appendChild(actionsCell);
     tableBody.appendChild(row);
   });
 
   document.getElementById('closedTradesEmptyState').classList.toggle('hidden', trades.length > 0);
+}
+
+function deleteClosedTrade(index) {
+  const trade = state.closedTrades[index];
+  if (!trade) return;
+  if (!confirm(`Delete the ${trade.ticker || 'unknown'} closed trade from history? This cannot be undone.`)) return;
+
+  state.closedTrades.splice(index, 1);
+  saveState();
+  renderBoard();
+  logTerminal(`[History]: Removed the ${trade.ticker || 'unknown'} closed trade from history.`);
+  showToast('Closed trade removed from history.', 'info');
 }
 
 function formatQuoteMetadata(holding) {
@@ -1240,7 +1291,7 @@ function createDailyQuoteLabel(details) {
   if (hasChange) {
     const sign = details.change >= 0 ? '+' : '−';
     parts.push(`${sign}$${formatUSD(Math.abs(details.change))} (${sign}${Math.abs(details.changePercent).toFixed(2)}%)`);
-    label.classList.add(details.change >= 0 ? 'text-emerald-400' : 'text-rose-400');
+    label.classList.add('text-slate-400');
   } else {
     label.classList.add('text-slate-400');
   }
@@ -3410,7 +3461,8 @@ async function executeCommand() {
 
 window.onload = async () => {
   await loadSavedState();
-  headerCredentialsHidden = localStorage.getItem('header_credentials_hidden') === 'true';
+  const credentialsConfigured = areHeaderCredentialsConfigured();
+  headerCredentialsHidden = credentialsConfigured || localStorage.getItem('header_credentials_hidden') === 'true';
   ['apiKeyInput', 'finnhubKeyInput', 'alphaVantageKeyInput', 'twelveDataKeyInput', 'rapidApiKeyInput', 'gistIdInput', 'githubTokenInput'].forEach(id => {
     document.getElementById(id).addEventListener('input', updateHeaderCredentialsVisibility);
   });
@@ -3432,6 +3484,9 @@ window.onload = async () => {
   });
   document.getElementById('marketInsightsTabs').addEventListener('keydown', handleMarketInsightsTabKeydown);
   updateHeaderCredentialsVisibility();
+  if (credentialsConfigured) {
+    document.getElementById('mainDeskContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
   await refreshAllLivePrices();
 };
 

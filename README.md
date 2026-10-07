@@ -85,6 +85,8 @@ Keys are optional. Without provider keys, you can still record data manually, us
 
 Enter keys in the header and click **Save**. The app calls providers directly from your browser; availability, supported symbols, latency, and request limits depend on each provider's current terms and your account:
 
+When Gemini, Finnhub, Gist ID, and GitHub token are all configured, the credential inputs are automatically hidden on load and the page moves to the main desk. Use **Show keys** in the header to reveal them again.
+
 | Provider | Used for | Notes |
 | --- | --- | --- |
 | Finnhub | Primary live quote source; company news, fundamentals, earnings, analyst insights, and board analyst price targets | Some endpoints or symbols may be restricted by plan. A `403` for analyst targets means that endpoint is not available to the configured account. |
@@ -97,6 +99,8 @@ Enter keys in the header and click **Save**. The app calls providers directly fr
 When configured, Yahoo Finance via RapidAPI is checked first for a premarket price; if none is available, regular quote selection retains the **Finnhub → Twelve Data → Alpha Vantage → Yahoo Finance via RapidAPI → Stooq** order. Board analyst targets use **Finnhub → Alpha Vantage → Yahoo Finance via RapidAPI**. Market-insights analyst targets also try RapidAPI if Finnhub or Alpha Vantage lacks a target; the other insight sections use Finnhub and Alpha Vantage. Yahoo Finance via RapidAPI requires a key and is subject to the API listing's availability and plan limits. Twelve Data is not queried for analyst targets because that endpoint is not available on its free plan.
 
 Quote and insight data is cached briefly to limit repeat calls. Use the relevant **Refresh** control to request fresh data. A refresh cannot bypass provider permissions, quotas, or symbol coverage.
+
+When a specific margin stock is selected, **Finviz** and **Stocktwits** links appear on its board. They open that ticker's pages in new tabs; data from these sites is not imported into the app.
 
 ### Gemini key
 

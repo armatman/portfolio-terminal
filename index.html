@@ -8,12 +8,12 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script type="module" src="/src/main.ts"></script>
 </head>
-<body class="p-4 md:p-8">
+<body class="p-3 sm:p-4 md:p-6">
   <div id="toastContainer" class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
-  <div class="max-w-5xl mx-auto space-y-6">
+  <div class="max-w-6xl mx-auto space-y-5">
     
     <!-- Top Bar: Status, Keys, GitHub Gist Sync, Reset & Backups -->
-    <div class="border-card p-4 rounded-lg space-y-4">
+    <div class="border-card p-4 sm:p-5 rounded-xl space-y-4">
       <div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <div class="flex items-center gap-2 flex-wrap">
@@ -147,7 +147,7 @@
           </div>
           </div>
 
-          <div class="flex flex-wrap items-center gap-2 ml-auto">
+          <div class="flex flex-wrap items-center gap-2 ml-auto my-0 mx-auto">
             <button id="toggleHeaderCredentialsButton" onclick="toggleHeaderCredentialsVisibility()" aria-expanded="true" class="hidden bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 text-xs font-bold px-3 py-2 rounded transition" title="Hide credential inputs">
               Hide keys
             </button>
@@ -193,7 +193,7 @@
     </div>
 
     <!-- Active Position Header Panel -->
-    <div class="border-card p-6 rounded-lg space-y-4">
+    <div class="border-card p-4 sm:p-6 rounded-xl space-y-4">
       
       <!-- Asset View Tabs -->
       <div class="flex items-center justify-between border-b border-slate-800 pb-3 flex-wrap gap-2">
@@ -218,30 +218,33 @@
         </div>
 
         <div class="flex flex-wrap items-center justify-between gap-3">
-          <div class="text-2xl font-black text-white" id="boardTitle">COMBINED PORTFOLIO</div>
+          <div class="min-w-0 flex-1 text-2xl font-bold text-white" id="boardTitle">COMBINED PORTFOLIO</div>
           <div class="flex flex-wrap items-center gap-2">
             <div id="boardDailyMove" class="hidden"></div>
             <div id="boardAnalystConsensus" class="hidden"></div>
           </div>
-          <button id="marketInsightsToggle" type="button" onclick="toggleMarketInsights()" aria-expanded="false" aria-controls="marketInsightsPanel" class="hidden rounded border border-cyan-800/70 bg-cyan-950/30 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 transition hover:bg-cyan-900/50">
-            Market insights
-          </button>
+          <div class="flex flex-wrap items-center gap-2">
+            <div id="boardExternalLinks" class="flex items-center gap-2"></div>
+            <button id="marketInsightsToggle" type="button" onclick="toggleMarketInsights()" aria-expanded="false" aria-controls="marketInsightsPanel" class="hidden rounded border border-cyan-800/70 bg-cyan-950/30 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 transition hover:bg-cyan-900/50">
+              Market insights
+            </button>
+          </div>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-300">
-          <div><span class="text-slate-500">Tranches / Holdings:</span> <span id="boardTranches" class="text-white font-medium">None</span></div>
-          <div><span class="text-slate-500">Total Invested | Avg:</span> <span id="boardInvested" class="text-white font-medium">$0.00 | $0.00</span></div>
-          <div>
-            <span class="text-slate-500">Share Price | Mkt Value:</span> <span id="boardPrice" class="text-emerald-400 font-medium">$0.00 | $0.00 – +$0.00 (+0.00%)</span>
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5 text-xs text-slate-300">
+          <div class="portfolio-metric"><span class="portfolio-metric-label">Tranches / Holdings</span><span id="boardTranches" class="portfolio-metric-value">None</span></div>
+          <div class="portfolio-metric"><span class="portfolio-metric-label">Total Invested | Avg</span><span id="boardInvested" class="portfolio-metric-value">$0.00 | $0.00</span></div>
+          <div class="portfolio-metric">
+            <span class="portfolio-metric-label">Share Price | Market Value</span><span id="boardPrice" class="portfolio-metric-value text-emerald-400">$0.00 | $0.00 – +$0.00 (+0.00%)</span>
             <span id="boardDailyQuote" class="block text-[10px] text-slate-500"></span>
-            <span id="boardQuoteMeta" class="ml-2 text-[10px] text-slate-500"></span>
+            <span id="boardQuoteMeta" class="text-[10px] text-slate-500"></span>
           </div>
-          <div><span class="text-slate-500">Margin Debt:</span> <span id="boardMargin" class="text-rose-400 font-medium">-$0.00</span></div>
-          <div><span class="text-slate-500">Total Commissions:</span> <span id="boardComms" class="text-white font-medium">$0.00</span></div>
-          <div><span class="text-slate-500">Margin Charged to Date:</span> <span id="boardMarginCharged" class="text-white font-medium">$0.00</span></div>
+          <div class="portfolio-metric"><span class="portfolio-metric-label">Margin Debt</span><span id="boardMargin" class="portfolio-metric-value text-rose-300">-$0.00</span></div>
+          <div class="portfolio-metric"><span class="portfolio-metric-label">Total Commissions</span><span id="boardComms" class="portfolio-metric-value">$0.00</span></div>
+          <div class="portfolio-metric"><span class="portfolio-metric-label">Margin Charged</span><span id="boardMarginCharged" class="portfolio-metric-value">$0.00</span></div>
           
-          <div class="md:col-span-2 border-t border-slate-800/80 pt-2 flex flex-wrap gap-x-6 gap-y-1 text-slate-300">
-            <div><span class="text-slate-500">Total Account Equity:</span> <span id="boardEquity" class="text-white font-bold font-mono">$0.00</span></div>
+          <div class="portfolio-risk-summary text-slate-300">
+            <div><span class="text-slate-500">Account Equity:</span> <span id="boardEquity" class="text-white font-bold font-mono">$0.00</span></div>
             <div><span id="boardCushionLabel" class="text-slate-500">Allocated Cash / Collateral:</span> <span id="boardCushionMetric" class="text-cyan-400 font-bold font-mono">$0.00</span></div>
             <div title="Estimated from portfolio equity and configured margin thresholds; not a live broker risk indicator.">
               <span class="text-slate-500">Margin Risk:</span> <span id="boardMarginRisk" class="text-emerald-400 font-bold font-mono">No margin debt</span>
@@ -410,6 +413,7 @@
               <th class="py-2 px-3 text-right">Holding Duration</th>
               <th class="py-2 px-3 text-right">Fees &amp; Commissions</th>
               <th class="py-2 px-3 text-right">Net Profit</th>
+              <th class="py-2 px-3 text-right">Actions</th>
             </tr>
           </thead>
           <tbody id="closedTradesTableBody" class="divide-y divide-slate-800/60 font-mono"></tbody>
@@ -418,7 +422,7 @@
     </div>
 
     <!-- Conversational Terminal Box -->
-    <div class="border-card p-4 rounded-lg space-y-3">
+    <div class="border-card p-4 sm:p-5 rounded-xl space-y-3">
       <div class="text-xs font-bold text-slate-400 uppercase tracking-wider flex justify-between items-center">
         <span>Trading Console (Deterministic Engine + Gemini AI)</span>
         <span id="aiStatus" class="text-slate-500 text-[10px]">READY</span>

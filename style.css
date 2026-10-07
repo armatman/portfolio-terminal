@@ -7,40 +7,26 @@ body {
   min-height: 100vh;
   margin: 0;
   background:
-    radial-gradient(circle at top left, rgba(16, 185, 129, 0.12), transparent 28%),
-    radial-gradient(circle at top right, rgba(34, 211, 238, 0.1), transparent 24%),
-    linear-gradient(180deg, #040814 0%, #0b1120 100%);
+    radial-gradient(circle at 15% 0%, rgba(16, 185, 129, 0.07), transparent 30rem),
+    #080d18;
   color: #e2e8f0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
 }
 
 body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(148, 163, 184, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(148, 163, 184, 0.04) 1px, transparent 1px);
-  background-size: 22px 22px;
-  mask-image: radial-gradient(circle at center, black, transparent 90%);
-  pointer-events: none;
+  content: none;
 }
 
 .border-card {
   position: relative;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.94), rgba(15, 23, 42, 0.8));
-  box-shadow: 0 12px 30px rgba(2, 6, 23, 0.42), inset 0 1px 0 rgba(148, 163, 184, 0.08);
-  backdrop-filter: blur(4px);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(15, 23, 42, 0.78);
+  box-shadow: 0 8px 24px rgba(2, 6, 23, 0.2);
 }
 
 .border-card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(90deg, rgba(16, 185, 129, 0.08), transparent 30%, transparent 70%, rgba(34, 211, 238, 0.08));
-  pointer-events: none;
+  content: none;
 }
 
 #terminalLog,
@@ -96,11 +82,11 @@ select {
 }
 
 button:hover:not(:disabled) {
-  transform: translateY(-1px);
+  filter: brightness(1.08);
 }
 
 button:active:not(:disabled) {
-  transform: translateY(0) scale(0.98);
+  filter: brightness(0.96);
 }
 
 button:disabled {
@@ -128,12 +114,88 @@ input[type="number"]:user-invalid {
   border-color: rgba(251, 113, 133, 0.7);
 }
 
+input,
+select {
+  min-height: 2.5rem;
+}
+
+table thead {
+  background: rgba(15, 23, 42, 0.65);
+}
+
+table th {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+table tbody tr:nth-child(even) {
+  background: rgba(15, 23, 42, 0.24);
+}
+
+.portfolio-metric {
+  min-width: 0;
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  border-radius: 0.625rem;
+  background: rgba(2, 6, 23, 0.28);
+  padding: 0.8rem 0.9rem;
+}
+
+.portfolio-metric-label {
+  display: block;
+  margin-bottom: 0.3rem;
+  color: #94a3b8;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.portfolio-metric-value {
+  color: #f1f5f9;
+  font-size: 0.875rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.portfolio-risk-summary {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  padding-top: 0.85rem;
+}
+
+#boardQuoteMeta {
+  display: block;
+  margin: 0.25rem 0 0;
+}
+
+#boardTitle {
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+#tickerTabs {
+  max-width: 100%;
+  padding-bottom: 0.25rem;
+}
+
+#marketInsightsContent,
+#terminalLog {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
 tbody tr {
   transition: background-color 140ms ease, color 140ms ease;
 }
 
 .border-card {
-  transition: border-color 180ms ease, box-shadow 180ms ease;
+  transition: border-color 180ms ease;
 }
 
 .ui-view-enter {
@@ -174,11 +236,23 @@ tbody tr {
 
 @media (max-width: 768px) {
   body {
-    padding: 0.75rem;
+    line-height: 1.45;
   }
 
   .border-card {
     border-radius: 0.875rem;
+  }
+
+  .portfolio-metric {
+    padding: 0.7rem 0.75rem;
+  }
+
+  #boardTitle {
+    font-size: 1.25rem;
+  }
+
+  #terminalLog {
+    height: 14rem;
   }
 
   #cashCushionContainer > .bg-slate-900\/60 {
