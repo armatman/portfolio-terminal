@@ -1215,7 +1215,7 @@ function renderCashCushionPanel() {
 
   holdings.forEach((h, idx) => {
     const shares = Number(h.shares) || 0;
-    const price = Number(h.price) || 0;
+    const price = Number(h.currentPrice) || 0;
     const val = shares * price;
     const allocation = stocksTotal > 0 ? (val / stocksTotal) * 100 : 0;
     const quoteMeta = formatQuoteMetadata(h);
@@ -1238,7 +1238,7 @@ function renderCashCushionPanel() {
           ? h.quoteDetails.change > 0 ? 'bullish' : h.quoteDetails.change < 0 ? 'bearish' : 'neutral'
           : 'unknown',
         Number.isFinite(h.quoteDetails?.change)
-          ? `${h.quoteDetails.change > 0 ? '↑ Up' : h.quoteDetails.change < 0 ? '↓ Down' : '→ Flat'}`
+          ? `${h.quoteDetails.change > 0 ? '↑ Up' : h.quoteDetails.change < 0 ? '↓' : '→'}`
           : 'No daily signal'
       )
     );
