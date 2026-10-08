@@ -61,18 +61,40 @@ export function calculateTargetUpsidePercent(targetPrice: number, currentPrice: 
 
 export function summarizeDailyQuote(
   holdings: DailyQuoteHolding[]
-): { direction: SentimentDirection; change: number; coverage: number; total: number } {
+): { direction: SentimentDirection; change: number; coverage: number; total: number; changePercent?: number } {
   let change = 0;
   let coverage = 0;
+  let previousValue = 0;
+
   holdings.forEach(holding => {
     const shares = Number(holding.shares);
-    const quoteChange = holding.quoteDetails?.change;
+    const price = holding.quoteDetails?.price ?? (holding as any).currentPrice;
+    const prev = (holding as any).previousClose ?? (holding as any).prevClose;
+
+    // Check for explicit change, or calculate it from current - previous
+    let quoteChange = holding.quoteDetails?.change ?? (holding as any).change;
+    
+    // If it's undefined, null, NaN, or Infinity, use the fallback math
+    if (!Number.isFinite(quoteChange)) {
+      if (typeof price === 'number' && typeof prev === 'number' && Number.isFinite(price) && Number.isFinite(prev)) {
+        quoteChange = price - prev;
+      }
+    }
+
     if (!Number.isFinite(shares) || shares <= 0 || typeof quoteChange !== 'number' || !Number.isFinite(quoteChange)) return;
+
     coverage += 1;
     change += shares * quoteChange;
+
+    if (typeof price === 'number' && Number.isFinite(price)) {
+      previousValue += shares * (price - quoteChange);
+    }
   });
+
   const direction = coverage === 0 ? 'unknown' : change > 0 ? 'bullish' : change < 0 ? 'bearish' : 'neutral';
-  return { direction, change, coverage, total: holdings.length };
+  const changePercent = previousValue > 0 ? (change / previousValue) * 100 : undefined;
+
+  return { direction, change, coverage, total: holdings.length, changePercent };
 }
 
 export function sentimentLabel(direction: SentimentDirection): string {

@@ -110,13 +110,13 @@ async function fetchYahooStockData(ticker) {
 // ==========================================
 function encodePayload(obj) {
   const jsonStr = JSON.stringify(obj);
-  return btoa(encodeURIComponent(jsonStr).replace(/%([0-9A-F]{2})/g, function(match, p1) {
+  return btoa(encodeURIComponent(jsonStr).replace(/%([0-9A-F]{2})/g, function (match, p1) {
     return String.fromCharCode('0x' + p1);
   }));
 }
 
 function decodePayload(str) {
-  const jsonStr = decodeURIComponent(Array.prototype.map.call(atob(str), function(c) {
+  const jsonStr = decodeURIComponent(Array.prototype.map.call(atob(str), function (c) {
     return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
   }).join(''));
   return JSON.parse(jsonStr);
@@ -329,14 +329,14 @@ async function pullStateFromGistOnLoad() {
 
     let remoteState = null;
     let parsedEnvelope = null;
-    try { parsedEnvelope = JSON.parse(targetFile.content); } catch (e) {}
+    try { parsedEnvelope = JSON.parse(targetFile.content); } catch (e) { }
 
     if (parsedEnvelope) {
       if (parsedEnvelope.payload && typeof parsedEnvelope.payload === 'string') {
         try {
           remoteState = decodePayload(parsedEnvelope.payload);
         } catch (decErr) {
-          try { remoteState = JSON.parse(atob(parsedEnvelope.payload)); } catch (e2) {}
+          try { remoteState = JSON.parse(atob(parsedEnvelope.payload)); } catch (e2) { }
         }
       } else if (typeof parsedEnvelope === 'object') {
         remoteState = parsedEnvelope;
@@ -433,15 +433,15 @@ function updateHeaderCredentialsVisibility() {
   const saveButton = document.getElementById('saveApiKeysButton');
 
   if (!allFieldsFilled) headerCredentialsHidden = false;
-  
+
   fields.classList.toggle('hidden', headerCredentialsHidden);
   toggleButton.classList.toggle('hidden', !allFieldsFilled);
   saveButton.classList.toggle('hidden', headerCredentialsHidden);
-  
+
   toggleButton.textContent = headerCredentialsHidden ? 'Show keys' : 'Hide keys';
   toggleButton.title = headerCredentialsHidden ? 'Show credential inputs' : 'Hide credential inputs';
   toggleButton.setAttribute('aria-expanded', String(!headerCredentialsHidden));
-  
+
   const actionButtons = toggleButton.parentElement;
 
   localStorage.setItem('header_credentials_hidden', String(headerCredentialsHidden));
@@ -698,7 +698,7 @@ function verifyTradernetRulesOnload() {
   const dailyPct = (getDailyRate() * 100).toFixed(4);
   const maintenancePct = (TRADERNET_RULES.maintenanceMarginRatio * 100).toFixed(2);
   const rolloverTime = `${String(TRADERNET_RULES.rolloverHour).padStart(2, '0')}:${String(TRADERNET_RULES.rolloverMinute).padStart(2, '0')}`;
-  document.getElementById('rulesSummary').innerText = 
+  document.getElementById('rulesSummary').innerText =
     `Broker model: ${ratePct}% p.a. (${dailyPct}%/d, /${TRADERNET_RULES.dayCountBasis}) | ${rolloverTime} Armenia time compounding | Maintenance equity ${maintenancePct}%`;
   updateRiskAssumptionTitles();
 }
@@ -1022,7 +1022,7 @@ function renderBoard() {
   const cushionTotal = getCashCushionTotal();
   const cushionBtn = document.createElement('button');
   cushionBtn.className = `px-3 py-1 rounded text-xs font-bold transition flex items-center gap-1.5 ${isCushionActive ? 'bg-cyan-500 text-black' : 'bg-slate-900 border border-cyan-800/60 text-cyan-400 hover:bg-slate-800'}`;
-  cushionBtn.innerHTML = `<span>🛡️ BALANCE</span> <span class="text-[10px] px-1.5 py-0.2 rounded ${isCushionActive ? 'bg-cyan-800 text-white' : 'bg-cyan-950 text-cyan-300 font-mono'}">+$${cushionTotal.toLocaleString('en-US', {maximumFractionDigits:0})}</span>`;
+  cushionBtn.innerHTML = `<span>🛡️ BALANCE</span> <span class="text-[10px] px-1.5 py-0.2 rounded ${isCushionActive ? 'bg-cyan-800 text-white' : 'bg-cyan-950 text-cyan-300 font-mono'}">+$${cushionTotal.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>`;
   cushionBtn.onclick = () => setActiveView("CASH_CUSHION");
   tabsContainer.appendChild(cushionBtn);
 
@@ -1410,23 +1410,6 @@ function sentimentBadge(direction, label = sentimentLabel(direction)) {
   return badge;
 }
 
-function setBoardDailyMove(change, coverage, total, changePercent) {
-  const container = document.getElementById('boardDailyMove');
-  if (!container) return;
-  const details = [];
-  if (Number.isFinite(change)) {
-    details.push(`${change >= 0 ? '+' : '−'}$${formatUSD(Math.abs(change))}`);
-  } else {
-    details.push('unavailable');
-  }
-  if (Number.isFinite(changePercent)) {
-    details.push(`${changePercent >= 0 ? '+' : '−'}${Math.abs(changePercent).toFixed(2)}%`);
-  }
-  details.push(`quotes ${coverage}/${total}`);
-  container.textContent = `Today’s move · ${details.join(' · ')}`;
-  container.className = 'rounded border border-slate-700 bg-slate-900/70 px-2.5 py-1 text-[10px] font-semibold text-slate-300';
-}
-
 function getAnalystTargetPrice(result) {
   const targets = result?.targets && typeof result.targets === 'object' ? result.targets : {};
   const values = [result?.targetPrice, targets.targetMean, targets.targetMedian];
@@ -1585,14 +1568,14 @@ function renderBoardAnalystConsensus(ticker, force = false) {
   boardAnalystRequests.set(ticker, request);
   fetchBoardAnalystTarget(ticker).then(result => {
     if (localStorage.getItem('finnhub_api_key') !== finnhubKey ||
-        localStorage.getItem('alpha_vantage_api_key') !== alphaVantageKey ||
-        localStorage.getItem('rapidapi_yahoo_key') !== rapidApiKey) return;
+      localStorage.getItem('alpha_vantage_api_key') !== alphaVantageKey ||
+      localStorage.getItem('rapidapi_yahoo_key') !== rapidApiKey) return;
     boardAnalystSnapshots.set(ticker, { ...result, credentials, fetchedAt: Date.now() });
     boardAnalystErrors.delete(ticker);
   }).catch(requestError => {
     if (localStorage.getItem('finnhub_api_key') !== finnhubKey ||
-        localStorage.getItem('alpha_vantage_api_key') !== alphaVantageKey ||
-        localStorage.getItem('rapidapi_yahoo_key') !== rapidApiKey) return;
+      localStorage.getItem('alpha_vantage_api_key') !== alphaVantageKey ||
+      localStorage.getItem('rapidapi_yahoo_key') !== rapidApiKey) return;
     const message = requestError instanceof Error ? requestError.message : String(requestError);
     const summaryParts = [];
     if (message.includes('Finnhub analyst price targets are restricted')) {
@@ -1736,24 +1719,24 @@ function renderMarketInsightFundamentals(result) {
   const overview = result?.overview && typeof result.overview === 'object' ? result.overview : null;
   const profile = overview
     ? {
-        name: overview.Name,
-        finnhubIndustry: overview.Industry || overview.Sector,
-        exchange: overview.Exchange,
-        country: overview.Country,
-        weburl: overview.OfficialSite,
-        marketCapitalization: Number(overview.MarketCapitalization) / 1_000_000
-      }
+      name: overview.Name,
+      finnhubIndustry: overview.Industry || overview.Sector,
+      exchange: overview.Exchange,
+      country: overview.Country,
+      weburl: overview.OfficialSite,
+      marketCapitalization: Number(overview.MarketCapitalization) / 1_000_000
+    }
     : result?.profile && typeof result.profile === 'object' ? result.profile : {};
   const metric = result?.metric && typeof result.metric === 'object' ? result.metric : {};
   const metrics = overview
     ? {
-        marketCapitalization: profile.marketCapitalization,
-        peBasicExclExtraTTM: Number(overview.PERatio),
-        epsBasicExclExtraItemsTTM: Number(overview.EPS),
-        '52WeekHigh': Number(overview['52WeekHigh']),
-        '52WeekLow': Number(overview['52WeekLow']),
-        dividendYieldIndicatedAnnual: Number(overview.DividendYield) * 100
-      }
+      marketCapitalization: profile.marketCapitalization,
+      peBasicExclExtraTTM: Number(overview.PERatio),
+      epsBasicExclExtraItemsTTM: Number(overview.EPS),
+      '52WeekHigh': Number(overview['52WeekHigh']),
+      '52WeekLow': Number(overview['52WeekLow']),
+      dividendYieldIndicatedAnnual: Number(overview.DividendYield) * 100
+    }
     : metric.metric && typeof metric.metric === 'object' ? metric.metric : {};
   const hasProfile = typeof profile.name === 'string' && profile.name.trim();
   const hasMetrics = Object.keys(metrics).length > 0;
@@ -1847,12 +1830,12 @@ function renderMarketInsightEarnings(data) {
   const events = Array.isArray(data?.earningsCalendar) ? data.earningsCalendar
     : isHistorical && Array.isArray(data?.quarterlyEarnings)
       ? data.quarterlyEarnings.map(event => ({
-          date: event.fiscalDateEnding,
-          hour: 'reported',
-          epsEstimate: Number(event.estimatedEPS),
-          epsActual: Number(event.reportedEPS),
-          surprisePercentage: Number(event.surprisePercentage)
-        }))
+        date: event.fiscalDateEnding,
+        hour: 'reported',
+        epsEstimate: Number(event.estimatedEPS),
+        epsActual: Number(event.reportedEPS),
+        surprisePercentage: Number(event.surprisePercentage)
+      }))
       : [];
   const sorted = events
     .filter(event => event && typeof event === 'object' && typeof event.date === 'string')
@@ -1955,7 +1938,7 @@ function renderMarketInsightAnalysts(result) {
   if (hasTargets) {
     root.appendChild(createInsightElement('p', 'pt-1 text-[10px] text-slate-500', `Analyst price target${targets.lastUpdated ? ` · Updated ${formatInsightDate(targets.lastUpdated)}` : ''}`));
     const grid = createInsightElement('div', `grid grid-cols-2 gap-2 ${targetPrice !== null ? 'sm:grid-cols-1' : 'sm:grid-cols-4'}`);
-    if (targetPrice !== null)     appendInsightMetric(grid, result?.basis ? 'Average analyst target' : 'Consensus target', `$${formatUSD(targetPrice)}`);
+    if (targetPrice !== null) appendInsightMetric(grid, result?.basis ? 'Average analyst target' : 'Consensus target', `$${formatUSD(targetPrice)}`);
     else {
       [
         ['Low', 'targetLow'],
@@ -2105,18 +2088,18 @@ async function loadMarketInsight(section, force = false) {
     if (section === 'news') {
       const finnhubKey = localStorage.getItem('finnhub_api_key');
       if (!finnhubKey) throw new Error("Finnhub API key required for news.");
-      
+
       const toDate = new Date().toISOString().split('T')[0];
       const fromDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
       const res = await fetch(`https://finnhub.io/api/v1/company-news?symbol=${ticker}&from=${fromDate}&to=${toDate}&token=${finnhubKey}`);
       if (!res.ok) throw new Error("Finnhub news request failed.");
       const news = await res.json();
-      
+
       if (!news || news.length === 0) {
         content.innerHTML = '<div class="py-3 text-slate-500 text-xs">No recent news found.</div>';
         return;
       }
-      
+
       content.innerHTML = '<div class="space-y-2 mt-2">' + news.slice(0, 5).map(n => `
         <a href="${n.url}" target="_blank" class="block bg-slate-900/60 p-2.5 rounded border border-slate-800 hover:border-cyan-800 transition">
           <div class="text-[10px] text-cyan-400 mb-1">${new Date(n.datetime * 1000).toLocaleDateString()} · ${n.source}</div>
@@ -2134,7 +2117,7 @@ async function loadMarketInsight(section, force = false) {
     if (section === 'fundamentals') {
       const val = data.valuation || {};
       const fh = data.financialHealth || {};
-      
+
       content.innerHTML = `
         <div class="p-3 bg-slate-950/60 rounded border border-slate-800 space-y-3 font-mono text-xs mt-2">
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -2173,17 +2156,17 @@ async function loadMarketInsight(section, force = false) {
           </div>
         </div>
       `;
-    } 
+    }
     else if (section === 'analysts') {
       const t = data.analystTargets || {};
       const upDown = data.upgradesDowngrades || [];
-      
-      let udHtml = upDown.length > 0 
+
+      let udHtml = upDown.length > 0
         ? upDown.slice(0, 4).map(u => `
             <div class="flex justify-between items-center border-b border-slate-800/60 py-1.5 last:border-0">
               <span class="text-slate-300">${u.firm}</span>
               <span class="text-[10px] font-bold ${u.action === 'up' ? 'text-emerald-400' : u.action === 'down' ? 'text-rose-400' : 'text-cyan-400'}">${u.action.toUpperCase()}: ${u.fromGrade || ''} ➝ ${u.toGrade || ''}</span>
-            </div>`).join('') 
+            </div>`).join('')
         : '<div class="text-slate-500">No recent actions</div>';
 
       content.innerHTML = `
@@ -2204,13 +2187,13 @@ async function loadMarketInsight(section, force = false) {
     else if (section === 'earnings') {
       const cal = data.calendar || {};
       const eh = data.earningsHistory || [];
-      
-      let ehHtml = eh.length > 0 
+
+      let ehHtml = eh.length > 0
         ? eh.map(e => `
             <div class="flex justify-between items-center border-b border-slate-800/60 py-1.5 last:border-0">
               <span class="text-slate-300 font-bold">${e.quarter}</span>
               <span class="text-[10px]">Est: ${e.epsEstimate} | Act: <span class="${e.epsDifference >= 0 ? 'text-emerald-400' : 'text-rose-400'} font-bold">${e.epsActual}</span> (${e.surprisePercent})</span>
-            </div>`).join('') 
+            </div>`).join('')
         : '<div class="text-slate-500">No recent earnings history</div>';
 
       content.innerHTML = `
@@ -2343,7 +2326,7 @@ async function addCashStockFromUI() {
   const manualPrice = priceInput.value === '' ? NaN : priceInput.valueAsNumber;
 
   if (!tickerInput.reportValidity() || !sharesInput.reportValidity() ||
-      (priceInput.value !== '' && !priceInput.reportValidity())) return;
+    (priceInput.value !== '' && !priceInput.reportValidity())) return;
 
   if (!ticker) {
     logTerminal(`[Error]: Please enter valid ticker symbol and share count.`);
@@ -2412,11 +2395,11 @@ function renderCombinedView(tickers) {
     : "None";
 
   document.getElementById('boardInvested').innerText = `$${formatUSD(totalInvested)} | Across ${tickers.length} Assets`;
-  
+
   const unSign = totalUnrealized >= 0 ? '+' : '';
   document.getElementById('boardPrice').innerHTML = `$${formatUSD(totalMarketValue)} – <span class="${totalUnrealized >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${unSign}$${formatUSD(totalUnrealized)} (${unSign}${unrealizedPct.toFixed(2)}%)</span>`;
-  
-  document.getElementById('boardMargin').innerText = `-$${formatUSD(totalDebt)} ($${formatUSD(dailyAccrual)}/day @ ${(getDailyRate()*100).toFixed(4)}%)`;
+
+  document.getElementById('boardMargin').innerText = `-$${formatUSD(totalDebt)} ($${formatUSD(dailyAccrual)}/day @ ${(getDailyRate() * 100).toFixed(4)}%)`;
   document.getElementById('boardComms').innerText = `$${formatUSD(totalComms)} ($${formatUSD(totalCommBuy)} buy / $${formatUSD(totalCommSell)} sell)`;
   document.getElementById('boardMarginCharged').innerText = `$${formatUSD(totalMarginCharged)}`;
 
@@ -2433,11 +2416,10 @@ function renderCombinedView(tickers) {
     ...(state.cashCushion?.holdings || [])
   ];
   const dailySummary = summarizeDailyQuote(portfolioHoldings);
-  setBoardDailyMove(
-    dailySummary.coverage ? dailySummary.change : Number.NaN,
-    dailySummary.coverage,
-    dailySummary.total
-  );
+
+  const moveEl = document.getElementById('boardDailyMove');
+  if (moveEl) moveEl.classList.remove('hidden');
+
   renderBoardAnalystConsensus(tickers[0]);
 
   const totalAccountEquity = (totalMarketValue + cushionTotal) - totalDebt;
@@ -2461,7 +2443,7 @@ function renderSingleAssetView(pos) {
 
   const portfolioInvested = getTotalPortfolioInvested();
   const weight = portfolioInvested > 0 ? (totalInvested / portfolioInvested) : 1;
-  
+
   const totalAccountDebt = Math.abs(state.marginBalance);
   const allocatedDebt = totalAccountDebt * weight;
   const totalCushion = getCashCushionTotal();
@@ -2477,11 +2459,11 @@ function renderSingleAssetView(pos) {
   const unrealizedPct = avgPrice > 0 ? ((pos.currentPrice - avgPrice) / avgPrice) * 100 : 0;
 
   document.getElementById('boardTitle').innerText = `${pos.ticker} (${pos.shares} Shares @ $${formatUSD(pos.pt)} PT | ${netPct >= 0 ? '+' : ''}${netPct.toFixed(2)}% Net Target)`;
-  document.getElementById('boardTranches').innerText = (pos.tranches && pos.tranches.length > 0) 
+  document.getElementById('boardTranches').innerText = (pos.tranches && pos.tranches.length > 0)
     ? pos.tranches.map(t => `${t.qty} @ $${formatUSD(t.price)} (${t.date || 'New'})`).join(' + ')
     : "None";
   document.getElementById('boardInvested').innerText = `$${formatUSD(totalInvested)} | $${formatUSD(avgPrice)}`;
-  
+
   const unSign = unrealized >= 0 ? '+' : '';
   document.getElementById('boardPrice').innerHTML = `$${formatUSD(pos.currentPrice)} | $${formatUSD(currentMktVal)} – <span class="${unrealized >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${unSign}$${formatUSD(unrealized)} (${unSign}${unrealizedPct.toFixed(2)}%)</span>`;
   const boardDailyQuote = document.getElementById('boardDailyQuote');
@@ -2491,14 +2473,9 @@ function renderSingleAssetView(pos) {
   const dailyChange = Number.isFinite(pos.quoteDetails?.change)
     ? pos.quoteDetails.change * pos.shares
     : Number.NaN;
-  setBoardDailyMove(
-    dailyChange,
-    Number.isFinite(pos.quoteDetails?.change) ? 1 : 0,
-    1,
-    pos.quoteDetails?.changePercent
-  );
+
   renderBoardAnalystConsensus(pos.ticker);
-  
+
   const isFullDebt = Math.abs(allocatedDebt - totalAccountDebt) < 0.01;
   document.getElementById('boardMargin').innerText = isFullDebt
     ? `-$${formatUSD(allocatedDebt)} ($${formatUSD(allocatedDailyAccrual)}/day)`
@@ -2582,7 +2559,7 @@ function formatRiskTrigger(triggerValue, currentValue) {
 function renderProjectionTable(gross, totalComms, debtToUse, marginChargedToUse, entryDate) {
   const tableBody = document.getElementById('projectionTableBody');
   tableBody.innerHTML = '';
-  
+
   if (debtToUse > 0 || gross > 0) {
     getUsEquityProjectionDates(new Date(), entryDate).forEach(({ date, daysFromToday, kind }) => {
       const dateFormatted = date.toLocaleDateString('en-US', {
@@ -2731,20 +2708,27 @@ async function fetchLivePriceFromProviders(symbol) {
 
   // 1. ABSOLUTE PRIORITY: Your Cloudflare Yahoo Proxy
   try {
-    const res = await fetch(`https://trading-proxy.armenavetisyan-sa.workers.dev?symbol=${encodeURIComponent(symbol)}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data?.price?.current > 0) {
-        price = data.price.current;
-        sourceName = "Yahoo Proxy";
-      }
+    const data = await fetchYahooStockData(symbol);
+
+    if (data?.price?.current > 0) {
+      price = data.price.current;
+      sourceName = "Yahoo Proxy";
+
+      const prevClose = data.price.previousClose ?? data.price.regularMarketPreviousClose;
+      const change = data.price.change ?? data.price.regularMarketChange ?? (price - prevClose);
+
+      quoteDetails = {
+        price: price,
+        change: change,
+        changePercent: prevClose ? (change / prevClose) * 100 : 0
+      };
     }
   } catch (e) {
     console.warn(`[Yahoo Proxy Quote Error]:`, e.message);
   }
 
   let rapidApiQuote = null;
-  if (rapidApiKey) {
+  if (!price && rapidApiKey) {
     try {
       rapidApiQuote = await fetchRapidApiYahooQuote(rapidApiKey, symbol);
       if (rapidApiQuote.preMarketPrice) {
@@ -2829,7 +2813,7 @@ async function fetchLivePriceFromProviders(symbol) {
     try {
       const stooqUrl = `https://stooq.com/q/l/?s=${encodeURIComponent(stooqSymbol.toLowerCase())}&f=sd2t2ohlcv&h&e=csv`;
       const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(stooqUrl)}`;
-      
+
       const res = await fetchQuoteProvider(proxyUrl);
       if (res.ok) {
         const json = await res.json();
@@ -2890,32 +2874,70 @@ async function fetchLivePrice(ticker, silent = false) {
 }
 
 async function refreshAllLivePrices() {
-  if (isRefreshingLivePrices) return;
 
-  const marginSymbols = Object.keys(state.positions);
-  const cashSymbols = (state.cashCushion?.holdings || []).map(h => h.ticker);
-  const allSymbols = Array.from(new Set([...marginSymbols, ...cashSymbols]));
+  const cashHoldings = state.cashCushion && state.cashCushion.holdings;
 
-  if (allSymbols.length === 0) return;
+  // 1. Gather all unique active tickers
+  const allTickers = new Set([
+    ...Object.keys(state.positions || {}),
+    ...(cashHoldings || []).map(h => h.ticker)
+  ]);
 
-  isRefreshingLivePrices = true;
-  try {
-    logTerminal(`[System]: Polling live quotes for ${allSymbols.join(', ')}...`);
-    const failedQuotes = [];
-    for (const sym of allSymbols) {
-      const result = await requestLivePrice(sym);
-      if (result.price === null) failedQuotes.push(`${sym} (${result.error})`);
+  const tickersArray = Array.from(allTickers);
+  if (tickersArray.length === 0) return;
+
+  logTerminal(`[System]: Polling live quotes for ${tickersArray.join(', ')}...`);
+
+  // 2. Fire all requests concurrently via your working single-symbol proxy
+  const fetchPromises = tickersArray.map(async (ticker) => {
+    const data = await fetchYahooStockData(ticker);
+    return { ticker, data };
+  });
+
+  const results = await Promise.all(fetchPromises);
+  let updatedCount = 0;
+
+  // 3. Process results, calculate changes, and attach quoteDetails
+  for (const { ticker, data } of results) {
+    if (!data || !data.price) continue;
+
+    const current = data.price.current ?? data.regularMarketPrice ?? data.price;
+    const previous = data.price.previousClose ?? data.regularMarketPreviousClose;
+    const change = data.price.change ?? data.regularMarketChange ?? (current - previous);
+
+    const quoteDetails = {
+      price: current,
+      change: change,
+      changePercent: previous ? (change / previous) * 100 : 0
+    };
+
+    // Update Margin Position
+    if (state.positions[ticker]) {
+      state.positions[ticker].currentPrice = current;
+      state.positions[ticker].quoteDetails = quoteDetails;
+      state.positions[ticker].quoteUpdatedAt = Date.now();
+      updatedCount++;
     }
-    if (failedQuotes.length < allSymbols.length) saveState();
+
+    // Update Cash/Non-Margin Holdings
+    if (Array.isArray(cashHoldings)) {
+      const cashPos = cashHoldings.find(h => h.ticker === ticker);
+      if (cashPos) {
+        cashPos.currentPrice = current;
+        cashPos.quoteDetails = quoteDetails;
+        cashPos.quoteUpdatedAt = Date.now();
+        updatedCount++;
+      }
+    }
+  }
+
+  // 4. Save and re-render only if data was updated
+  if (updatedCount > 0) {
+    saveState();
     renderBoard();
-    if (failedQuotes.length === 0) {
-      logTerminal(`[System]: Live market quotes refreshed for all ${allSymbols.length} assets.`);
-    } else {
-      const successfulCount = allSymbols.length - failedQuotes.length;
-      logTerminal(`[Market Data Error]: Quotes refreshed for ${successfulCount}/${allSymbols.length} assets. Failed: ${failedQuotes.join(', ')}.`);
-    }
-  } finally {
-    isRefreshingLivePrices = false;
+    logTerminal(`[System]: Live market quotes refreshed for ${updatedCount} assets.`);
+  } else {
+    logTerminal(`[Market Data Warning]: Failed to fetch updated quotes.`);
   }
 }
 
@@ -2993,7 +3015,7 @@ function runLadderSimulation(data) {
   const totalInvested = (pos.tranches || []).reduce((sum, t) => sum + (t.qty * t.price), 0);
   const portfolioInvested = getTotalPortfolioInvested();
   const weight = portfolioInvested > 0 ? (totalInvested / portfolioInvested) : 1;
-  
+
   let runningDebt = Math.abs(state.marginBalance) * weight;
   let totalAccruedMargin = pos.marginCharged || 0.00;
   let totalComms = pos.commBuy;
@@ -3072,7 +3094,7 @@ function runComparison(data) {
     const grossPnl = grossProceeds - totalInvested;
     const commSell = calcCommission(pos.shares, grossProceeds);
     const totalComms = pos.commBuy + commSell;
-    
+
     const b_t = debtToUse * Math.pow(1 + getDailyRate(), s.days);
     const additionalMargin = b_t - debtToUse;
     const totalMargin = marginChargedToUse + additionalMargin;
@@ -3231,7 +3253,17 @@ async function applyPortfolioActions(action) {
     });
     pos.commBuy += buyComm;
     pos.currentPrice = price;
+    pos.quoteDetails = {
+      price: pos.currentPrice,
+      // Make sure to use whatever variable names you have in this block for change/prevClose
+      change: change,
+      changePercent: prevClose ? (change / prevClose) * 100 : 0
+    };
+
     pos.quoteSource = 'Trade input';
+    const prevClose = data.price?.previousClose ?? data.regularMarketPreviousClose ?? data.previousClose;
+    const change = data.price?.change ?? data.regularMarketChange ?? (pos.currentPrice - prevClose);
+
     delete pos.quoteUpdatedAt;
     delete pos.quoteDetails;
     if (action.pt) pos.pt = Number(action.pt);
@@ -3252,7 +3284,7 @@ async function applyPortfolioActions(action) {
     saveState();
     logTerminal(`[Executed Buy]: Added ${shares} ${ticker} @ $${formatUSD(price)}. Outlay: $${formatUSD(totalOutlay)} (Comm: $${formatUSD(buyComm)}). Funded: $${formatUSD(cashUsed)} cash | +$${formatUSD(debtAdded)} margin debt. Free Cash remaining: $${formatUSD(state.cashCushion.freeCash)}. Total Margin Debt: -$${formatUSD(Math.abs(state.marginBalance))}.`);
     showToast(`${shares} ${ticker} bought at $${formatUSD(price)}.`, 'success');
-  } 
+  }
   else if (action.action === "sell") {
     const ticker = action.ticker.toUpperCase();
     let pos = state.positions[ticker];
@@ -3355,7 +3387,7 @@ async function applyPortfolioActions(action) {
   else if (action.action === "set_price") {
     const ticker = (action.ticker ? action.ticker.toUpperCase() : null) || (state.activeView !== "COMBINED" && state.activeView !== "CASH_CUSHION" && state.activeView !== "CLOSED_HISTORY" ? state.activeView : Object.keys(state.positions)[0]);
     const newP = Number(action.price);
-    
+
     if (!newP || isNaN(newP) || newP <= 0) {
       logTerminal(`[Price Unchanged]: No valid price amount supplied. Enter: price ${ticker} <number>.`);
       return;
@@ -3424,19 +3456,19 @@ function confirmAiPortfolioAction(action) {
     return false;
   }
   if (action.action === 'sell' &&
-      ((action.shares !== null && action.shares !== undefined && !isPositiveFinite(action.shares)) ||
-       !isPositiveFinite(action.price))) {
+    ((action.shares !== null && action.shares !== undefined && !isPositiveFinite(action.shares)) ||
+      !isPositiveFinite(action.price))) {
     logTerminal('[AI Action Error]: Gemini returned an invalid sale quantity or price. No changes were made.');
     return false;
   }
   if ((action.action === 'set_pt' && !isPositiveFinite(action.pt)) ||
-      (action.action === 'set_price' && !isPositiveFinite(action.price))) {
+    (action.action === 'set_price' && !isPositiveFinite(action.price))) {
     logTerminal('[AI Action Error]: Gemini returned an invalid price. No changes were made.');
     return false;
   }
   if (action.action === 'add_cash_stock' &&
-      (!isPositiveFinite(action.shares) ||
-       (action.price != null && (!Number.isFinite(Number(action.price)) || Number(action.price) < 0)))) {
+    (!isPositiveFinite(action.shares) ||
+      (action.price != null && (!Number.isFinite(Number(action.price)) || Number(action.price) < 0)))) {
     logTerminal('[AI Action Error]: Gemini returned invalid cash holding details. No changes were made.');
     return false;
   }
@@ -3471,7 +3503,7 @@ async function executeCommand() {
   const input = document.getElementById('cmdInput');
   const text = input.value.trim();
   if (!text) return;
-  
+
   logTerminal(text, true);
   input.value = '';
 
