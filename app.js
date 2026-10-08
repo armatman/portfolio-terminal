@@ -1133,7 +1133,7 @@ async function renderYahooInsights(ticker) {
   container.innerHTML = '<div class="py-3 text-center text-xs text-slate-500 font-mono animate-pulse">Loading market insights...</div>';
 
   try {
-    const res = await fetch(`https://trading-proxy.armenavetisyan-sa.workers.dev?symbol=${encodeURIComponent(ticker)}`);
+    const res = await fetch(`${YAHOO_PROXY_URL}?symbol=${encodeURIComponent(ticker)}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
@@ -1428,7 +1428,7 @@ async function fetchBoardAnalystTarget(ticker) {
   const cleanTicker = ticker.trim().toUpperCase();
 
   try {
-    const res = await fetch(`https://trading-proxy.armenavetisyan-sa.workers.dev?symbol=${encodeURIComponent(cleanTicker)}`);
+    const res = await fetch(`${YAHOO_PROXY_URL}?symbol=${encodeURIComponent(cleanTicker)}`);
     if (res.ok) {
       const data = await res.json();
       const t = data.analystTargets;
@@ -2110,7 +2110,7 @@ async function loadMarketInsight(section, force = false) {
     }
 
     // --- TABS 2, 3, 4: YAHOO PROXY WORKER ---
-    const res = await fetch(`https://trading-proxy.armenavetisyan-sa.workers.dev?symbol=${encodeURIComponent(ticker)}`);
+    const res = await fetch(`${YAHOO_PROXY_URL}?symbol=${encodeURIComponent(ticker)}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
