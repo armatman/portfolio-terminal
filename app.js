@@ -1237,9 +1237,7 @@ function renderCashCushionPanel() {
         Number.isFinite(h.quoteDetails?.change)
           ? h.quoteDetails.change > 0 ? 'bullish' : h.quoteDetails.change < 0 ? 'bearish' : 'neutral'
           : 'unknown',
-        Number.isFinite(h.quoteDetails?.change)
-          ? `${h.quoteDetails.change > 0 ? '↑ Up' : h.quoteDetails.change < 0 ? '↓' : '→'}`
-          : 'No daily signal'
+        Number.isFinite(h.quoteDetails?.change) && `${h.quoteDetails.changePercent.toFixed(2)}%`
       )
     );
     addCell(shares.toLocaleString('en-US', { maximumFractionDigits: 3 }), 'py-2 px-3 text-right text-slate-200 tabular-nums');
