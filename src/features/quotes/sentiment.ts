@@ -6,8 +6,11 @@ export interface SentimentBadge {
 }
 
 export interface DailyQuoteHolding {
-  shares: number;
+  shares?: number | string;
+  currentPrice?: number;
+  previousClose?: number;
   quoteDetails?: {
+    price?: number;
     change?: number;
     changePercent?: number;
   };
@@ -73,7 +76,7 @@ export function summarizeDailyQuote(
 
     // Check for explicit change, or calculate it from current - previous
     let quoteChange = holding.quoteDetails?.change ?? (holding as any).change;
-    
+
     // If it's undefined, null, NaN, or Infinity, use the fallback math
     if (!Number.isFinite(quoteChange)) {
       if (typeof price === 'number' && typeof prev === 'number' && Number.isFinite(price) && Number.isFinite(prev)) {
