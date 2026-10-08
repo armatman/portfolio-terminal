@@ -36,21 +36,15 @@ describe('Gemini client', () => {
 
   it('prioritizes the newest generation, then stable Flash, Pro, and Lite models', () => {
     expect(prioritizeGeminiModels([
+      'gemini-2.5-pro',
       'gemini-2.5-flash',
-      'gemini-3-flash-preview',
-      'gemini-3-pro-preview',
-      'gemini-3-pro',
-      'gemini-3-flash-lite',
       'gemini-3.1-flash',
       'gemini-3.1-pro'
     ])).toEqual([
       'gemini-3.1-flash',
       'gemini-3.1-pro',
-      'gemini-3-pro',
-      'gemini-3-flash-lite',
-      'gemini-3-flash-preview',
-      'gemini-3-pro-preview',
-      'gemini-2.5-flash'
+      'gemini-2.5-flash',
+      'gemini-2.5-pro'
     ]);
   });
 

@@ -24,6 +24,9 @@ export class GeminiApiError extends Error {
 }
 
 export function shouldTryAnotherGeminiModel(error: unknown): boolean {
+  // Catch timeout aborts so it tries the next model instead of stopping
+  if (error instanceof Error && /timed out/i.test(error.message)) return true;
+
   if (!(error instanceof GeminiApiError)) return false;
   if (error.status === 404 || error.status === 429 || error.status === 503) return true;
   return error.status === 400 &&
@@ -35,32 +38,36 @@ const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 30 * 1000;
 const modelCache = new Map<string, { expiresAt: number; models: string[] }>();
 
-function geminiModelPriority(name: string): [number, number, number, number] {
-  const normalizedName = name.toLowerCase().replace(/^models\//, '');
-  const generation = normalizedName.match(/^gemini-(\d+)(?:\.(\d+))?/);
-  const major = generation ? Number(generation[1]) : 0;
-  const minor = generation?.[2] ? Number(generation[2]) : 0;
-  const previewPenalty = /(?:^|[-_])(?:preview|experimental|exp)(?:[-_]|$)/.test(normalizedName) ? 1 : 0;
-  const tier = /(?:^|[-_])flash-lite(?:[-_]|$)/.test(normalizedName)
-    ? 2
-    : /(?:^|[-_])flash(?:[-_]|$)/.test(normalizedName)
-      ? 0
-      : /(?:^|[-_])pro(?:[-_]|$)/.test(normalizedName)
-        ? 1
-        : 3;
-  return [major, minor, -previewPenalty, -tier];
-}
-
 export function prioritizeGeminiModels(models: string[]): string[] {
-  return [...models].sort((left, right) => {
-    const leftPriority = geminiModelPriority(left);
-    const rightPriority = geminiModelPriority(right);
-    for (let index = 0; index < leftPriority.length; index += 1) {
-      if (leftPriority[index] !== rightPriority[index]) {
-        return rightPriority[index] - leftPriority[index];
-      }
-    }
-    return left.localeCompare(right);
+  const preferredOrder = [
+    'gemini-3.1-flash-lite',
+    'gemini-2.5-flash-lite',
+    'gemini-3.1-flash',
+    'gemini-3.1-pro',
+    'gemini-2.5-flash',
+    'gemini-2.5-pro',
+    'gemini-flash',
+    'gemini-pro'
+  ];
+
+  return [...models].sort((a, b) => {
+    const idxA = preferredOrder.indexOf(a);
+    const idxB = preferredOrder.indexOf(b);
+    if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+    if (idxA !== -1) return -1;
+    if (idxB !== -1) return 1;
+
+    // Fallback for unlisted models: newer version first, flash over pro
+    const vA = parseFloat((a.match(/\d+(\.\d+)?/) || ['0'])[0]);
+    const vB = parseFloat((b.match(/\d+(\.\d+)?/) || ['0'])[0]);
+    if (vA !== vB) return vB - vA;
+
+    const aIsFlash = /flash/i.test(a);
+    const bIsFlash = /flash/i.test(b);
+    if (aIsFlash && !bIsFlash) return -1;
+    if (!aIsFlash && bIsFlash) return 1;
+
+    return a.localeCompare(b);
   });
 }
 

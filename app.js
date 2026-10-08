@@ -81,6 +81,30 @@ const QUOTE_REFRESH_INTERVAL_KEY = 'quote_refresh_interval_ms';
 const DEFAULT_QUOTE_REFRESH_INTERVAL_MS = 60 * 1000;
 const QUOTE_REFRESH_INTERVALS = new Set([0, 15 * 1000, 30 * 1000, 60 * 1000]);
 
+
+// ==========================================
+// HANDLE YAHOO API DATA
+// ==========================================
+const YAHOO_PROXY_URL = 'https://trading-proxy.armenavetisyan-sa.workers.dev';
+
+async function fetchYahooStockData(ticker) {
+  if (!ticker) return null;
+  const cleanTicker = ticker.trim().toUpperCase();
+
+  try {
+    const res = await fetch(`${YAHOO_PROXY_URL}?symbol=${encodeURIComponent(cleanTicker)}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    return data;
+  } catch (err) {
+    console.warn(`[Yahoo Data Error for ${cleanTicker}]:`, err.message);
+    return null;
+  }
+}
+
 // ==========================================
 // GITHUB GIST ENCODING & REPLICATION ENGINE
 // ==========================================
@@ -1068,28 +1092,86 @@ function renderBoard() {
 }
 
 function getMarketInsightsTicker() {
-  if (state.positions[state.activeView]) return state.activeView;
-  if (state.activeView === 'COMBINED') return Object.keys(state.positions)[0] || '';
-  return '';
+  const currentView = state.activeView;
+  if (currentView && currentView !== 'COMBINED' && currentView !== 'CASH_CUSHION') {
+    return currentView;
+  }
+  const tickers = Object.keys(state.positions || {});
+  return tickers.length === 1 ? tickers[0] : '';
 }
 
 function syncMarketInsightsPanel() {
   const ticker = getMarketInsightsTicker();
   const toggle = document.getElementById('marketInsightsToggle');
   const panel = document.getElementById('marketInsightsPanel');
+  if (!toggle || !panel) return;
+
   toggle.classList.toggle('hidden', !ticker);
   panel.classList.toggle('hidden', !marketInsightsOpen || !ticker);
   toggle.setAttribute('aria-expanded', String(marketInsightsOpen && Boolean(ticker)));
-  toggle.textContent = marketInsightsOpen ? 'Hide insights' : 'Market insights';
+  toggle.textContent = marketInsightsOpen ? 'HIDE INSIGHTS' : 'MARKET INSIGHTS';
+
   if (!ticker) {
     marketInsightsOpen = false;
     loadedInsightTicker = '';
     return;
   }
-  document.getElementById('marketInsightsTicker').textContent = `· ${ticker}`;
+
+  const tickerBadge = document.getElementById('marketInsightsTicker');
+  if (tickerBadge) tickerBadge.textContent = `· ${ticker}`;
+
   if (marketInsightsOpen && loadedInsightTicker !== ticker) {
     loadedInsightTicker = ticker;
     loadMarketInsight(activeInsightSection);
+  }
+}
+
+async function renderYahooInsights(ticker) {
+  const container = document.getElementById('marketInsightsBody') || document.getElementById('marketInsightsPanel');
+  if (!container) return;
+
+  container.innerHTML = '<div class="py-3 text-center text-xs text-slate-500 font-mono animate-pulse">Loading market insights...</div>';
+
+  try {
+    const res = await fetch(`https://trading-proxy.armenavetisyan-sa.workers.dev?symbol=${encodeURIComponent(ticker)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    const val = data.valuation || {};
+    const cal = data.calendar || {};
+    const t = data.analystTargets || {};
+    const p = data.price || {};
+
+    container.innerHTML = `
+      <div class="p-3 bg-slate-950/60 rounded border border-slate-800 space-y-3 font-mono text-xs">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div class="bg-slate-900/70 p-2 rounded border border-slate-800/80">
+            <span class="text-[10px] text-slate-500 uppercase block">Trailing P/E</span>
+            <span class="text-white font-bold">${val.peTrailing ? Number(val.peTrailing).toFixed(2) : '—'}</span>
+          </div>
+          <div class="bg-slate-900/70 p-2 rounded border border-slate-800/80">
+            <span class="text-[10px] text-slate-500 uppercase block">Forward P/E</span>
+            <span class="text-white font-bold">${val.peForward ? Number(val.peForward).toFixed(2) : '—'}</span>
+          </div>
+          <div class="bg-slate-900/70 p-2 rounded border border-slate-800/80">
+            <span class="text-[10px] text-slate-500 uppercase block">PEG Ratio</span>
+            <span class="text-white font-bold">${val.pegRatio ?? '—'}</span>
+          </div>
+          <div class="bg-slate-900/70 p-2 rounded border border-slate-800/80">
+            <span class="text-[10px] text-slate-500 uppercase block">Short % Float</span>
+            <span class="text-amber-400 font-bold">${val.shortPercentOfFloat ?? '—'}</span>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1 border-t border-slate-800/60 text-[11px]">
+          <div><span class="text-slate-500">Mean Target:</span> <span class="text-emerald-400 font-bold">$${t.mean ? t.mean.toFixed(2) : '—'}</span></div>
+          <div><span class="text-slate-500">Consensus:</span> <span class="text-cyan-300 font-bold uppercase">${t.consensusRecommendation || '—'}</span> (${t.numberOfAnalysts || 0} analysts)</div>
+          <div><span class="text-slate-500">Next Earnings:</span> <span class="text-purple-300 font-bold">${cal.earningsDate || 'TBD'}</span></div>
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    container.innerHTML = `<div class="py-2 text-rose-400 text-xs">Failed to load insights: ${err.message}</div>`;
   }
 }
 
@@ -1358,6 +1440,37 @@ async function fetchBoardAnalystTarget(ticker) {
   const failures = [];
   const restrictionKey = `${FINNHUB_ANALYST_RESTRICTED_PREFIX}${ticker}`;
   const finnhubRestricted = sessionStorage.getItem(restrictionKey) === 'true';
+
+  if (!ticker) return null;
+  const cleanTicker = ticker.trim().toUpperCase();
+
+  try {
+    const res = await fetch(`https://trading-proxy.armenavetisyan-sa.workers.dev?symbol=${encodeURIComponent(cleanTicker)}`);
+    if (res.ok) {
+      const data = await res.json();
+      const t = data.analystTargets;
+      const targetPrice = t?.median || t?.mean || t?.high;
+
+      // If Yahoo returns a valid target, return immediately. Finnhub gets ignored.
+      if (typeof targetPrice === "number" && Number.isFinite(targetPrice) && targetPrice > 0) {
+        return {
+          targetPrice: targetPrice,
+          provider: "Yahoo",
+          source: "Yahoo",
+          targetMean: t.mean,
+          targetHigh: t.high,
+          targetLow: t.low,
+          numberOfAnalysts: t.numberOfAnalysts || 0,
+          consensus: t.consensusRecommendation || null,
+          valuation: data.valuation,
+          calendar: data.calendar,
+          profile: data.profile
+        };
+      }
+    }
+  } catch (err) {
+    console.warn(`[Yahoo Worker Error for ${cleanTicker}]:`, err.message);
+  }
 
   if (finnhubKey && !finnhubRestricted) {
     try {
@@ -1962,155 +2075,160 @@ async function fetchAlphaVantageInsight(section, apiKey, ticker, force) {
 }
 
 async function loadMarketInsight(section, force = false) {
-  const sections = new Set(['news', 'fundamentals', 'earnings', 'analysts']);
-  if (!sections.has(section)) return;
-  activeInsightSection = section;
   const ticker = getMarketInsightsTicker();
   const content = document.getElementById('marketInsightsContent');
+  const tickerBadge = document.getElementById('marketInsightsTicker');
+
+  if (!content) return;
+
   if (!ticker) {
-    renderInsightNotice('Select a margin position to load its market insights.');
+    content.innerHTML = '<div class="py-4 text-center text-xs text-slate-500">Select a margin position to load its market insights.</div>';
     return;
   }
+
+  // 1. Update active tab states visually
   insightTicker = ticker;
-  document.getElementById('marketInsightsTicker').textContent = `· ${ticker}`;
+  activeInsightSection = section;
+  if (tickerBadge) tickerBadge.textContent = `· ${ticker}`;
+
   document.querySelectorAll('[data-insight]').forEach(button => {
     const selected = button.dataset.insight === section;
     button.className = `insight-tab whitespace-nowrap rounded px-3 py-1.5 text-[10px] font-bold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400 ${selected ? 'bg-cyan-400 text-slate-950 shadow-sm shadow-cyan-950' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'}`;
     button.setAttribute('aria-selected', String(selected));
     button.tabIndex = selected ? 0 : -1;
   });
-  document.getElementById('marketInsightsContent').setAttribute(
-    'aria-labelledby',
-    document.querySelector(`[data-insight="${section}"]`)?.id || 'insightTabNews'
-  );
 
-  const finnhubKey = localStorage.getItem('finnhub_api_key') || '';
-  const alphaVantageKey = localStorage.getItem('alpha_vantage_api_key') || '';
-  const rapidApiKey = localStorage.getItem('rapidapi_yahoo_key') || '';
-  if (!finnhubKey && !alphaVantageKey && !(section === 'analysts' && rapidApiKey)) {
-    setMarketInsightsStatus('Needs API key', 'warning');
-    renderInsightNotice('Add a Finnhub or Alpha Vantage API key to load company insights; analyst targets can also use a RapidAPI key.', true);
-    return;
-  }
+  content.innerHTML = '<div class="py-4 text-center text-xs text-slate-500 font-mono animate-pulse">Loading live data...</div>';
 
-  const requestId = ++insightRequestId;
-  const refreshButton = document.getElementById('marketInsightsRefresh');
-  refreshButton.disabled = true;
-  content.setAttribute('aria-busy', 'true');
-  setMarketInsightsStatus(`Loading ${section}…`, 'loading');
-  const loading = createInsightElement('div', 'space-y-3', '');
-  loading.setAttribute('aria-label', `Loading ${section} for ${ticker}`);
-  loading.append(
-    createInsightElement('div', 'h-3 w-40 animate-pulse rounded bg-slate-800'),
-    createInsightElement('div', 'h-3 w-3/4 animate-pulse rounded bg-slate-800'),
-    createInsightElement('div', 'h-3 w-1/2 animate-pulse rounded bg-slate-800')
-  );
-  content.replaceChildren(loading);
-  const now = new Date();
-  const to = now.toISOString().slice(0, 10);
-  const fromDate = new Date(now);
-  let request;
   try {
-    if (!finnhubKey) {
-      throw new Error('Finnhub key is not configured.');
-    } else if (section === 'news') {
-      fromDate.setDate(fromDate.getDate() - 30);
-      request = fetchFinnhubInsight(finnhubKey, 'company-news', {
-        symbol: ticker,
-        from: fromDate.toISOString().slice(0, 10),
-        to
-      }, { force });
-    } else if (section === 'fundamentals') {
-      request = Promise.all([
-        fetchFinnhubInsight(finnhubKey, 'stock/profile2', { symbol: ticker }, { force }),
-        fetchFinnhubInsight(finnhubKey, 'stock/metric', { symbol: ticker, metric: 'all' }, { force })
-      ]).then(([profile, metric]) => ({ profile, metric }));
-    } else if (section === 'earnings') {
-      fromDate.setDate(fromDate.getDate() - 30);
-      const toDate = new Date(now);
-      toDate.setDate(toDate.getDate() + 90);
-      request = fetchFinnhubInsight(finnhubKey, 'calendar/earnings', {
-        symbol: ticker,
-        from: fromDate.toISOString().slice(0, 10),
-        to: toDate.toISOString().slice(0, 10)
-      }, { force });
-    } else {
-      request = Promise.all([
-        fetchFinnhubInsight(finnhubKey, 'stock/recommendation', { symbol: ticker }, { force }),
-        fetchFinnhubInsight(finnhubKey, 'stock/price-target', { symbol: ticker }, { force })
-      ]).then(([recommendations, targets]) => ({ recommendations, targets }));
+    // --- TAB 1: NEWS (Finnhub) ---
+    if (section === 'news') {
+      const finnhubKey = localStorage.getItem('finnhub_api_key');
+      if (!finnhubKey) throw new Error("Finnhub API key required for news.");
+      
+      const toDate = new Date().toISOString().split('T')[0];
+      const fromDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const res = await fetch(`https://finnhub.io/api/v1/company-news?symbol=${ticker}&from=${fromDate}&to=${toDate}&token=${finnhubKey}`);
+      if (!res.ok) throw new Error("Finnhub news request failed.");
+      const news = await res.json();
+      
+      if (!news || news.length === 0) {
+        content.innerHTML = '<div class="py-3 text-slate-500 text-xs">No recent news found.</div>';
+        return;
+      }
+      
+      content.innerHTML = '<div class="space-y-2 mt-2">' + news.slice(0, 5).map(n => `
+        <a href="${n.url}" target="_blank" class="block bg-slate-900/60 p-2.5 rounded border border-slate-800 hover:border-cyan-800 transition">
+          <div class="text-[10px] text-cyan-400 mb-1">${new Date(n.datetime * 1000).toLocaleDateString()} · ${n.source}</div>
+          <div class="text-slate-200 text-xs font-semibold leading-snug">${n.headline}</div>
+        </a>
+      `).join('') + '</div>';
+      return;
     }
-    try {
-      let result = await request;
-      if (!hasMarketInsightData(section, result)) {
-        throw new Error(`Finnhub returned no ${section} data for ${ticker}.`);
-      }
-      if (section === 'analysts' && rapidApiKey && !hasAnalystPriceTarget(result)) {
-        try {
-          result = await addRapidApiAnalystTarget(result, ticker, rapidApiKey);
-        } catch (error) {
-          logTerminal(`[Yahoo Finance via RapidAPI]: Analyst-target fallback failed: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
-      if (requestId !== insightRequestId || ticker !== getMarketInsightsTicker()) return;
-      if (section === 'news') renderMarketInsightNews(result);
-      else if (section === 'fundamentals') renderMarketInsightFundamentals(result);
-      else if (section === 'earnings') renderMarketInsightEarnings(result);
-      else renderMarketInsightAnalysts(result);
-      setMarketInsightsStatus(`${result?.source || 'Finnhub'} · updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'success');
-    } catch (error) {
-      let fallbackFailure = error;
-      try {
-        if (!alphaVantageKey) throw error;
-        let result = await fetchAlphaVantageInsight(section, alphaVantageKey, ticker, force);
-        if (!hasMarketInsightData(section, result)) {
-          throw new Error(`Alpha Vantage returned no ${section} data for ${ticker}.`);
-        }
-        if (section === 'analysts' && rapidApiKey && !hasAnalystPriceTarget(result)) {
-          try {
-            result = await addRapidApiAnalystTarget(result, ticker, rapidApiKey);
-          } catch (error) {
-            logTerminal(`[Yahoo Finance via RapidAPI]: Analyst-target fallback failed: ${error instanceof Error ? error.message : String(error)}`);
-          }
-        }
-        if (requestId !== insightRequestId || ticker !== getMarketInsightsTicker()) return;
-        if (section === 'news') renderMarketInsightNews(result);
-        else if (section === 'fundamentals') renderMarketInsightFundamentals(result);
-        else if (section === 'earnings') renderMarketInsightEarnings(result);
-        else renderMarketInsightAnalysts(result);
-        setMarketInsightsStatus(`${result?.source || 'Alpha Vantage'} · updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'success');
-      } catch (fallbackError) {
-        fallbackFailure = new Error(
-          `Finnhub failed: ${error instanceof Error ? error.message : String(error)}. Alpha Vantage fallback failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}.`
-        );
-      }
-      if (section === 'analysts' && rapidApiKey) {
-        try {
-          const result = await addRapidApiAnalystTarget({}, ticker, rapidApiKey);
-          if (!hasMarketInsightData(section, result)) {
-            throw new Error(`Yahoo Finance via RapidAPI returned no analyst target data for ${ticker}.`);
-          }
-          if (requestId !== insightRequestId || ticker !== getMarketInsightsTicker()) return;
-          renderMarketInsightAnalysts(result);
-          setMarketInsightsStatus(`Yahoo Finance via RapidAPI · updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'success');
-          return;
-        } catch (rapidApiError) {
-          fallbackFailure = new Error(
-            `${fallbackFailure instanceof Error ? fallbackFailure.message : String(fallbackFailure)} Yahoo Finance via RapidAPI fallback failed: ${rapidApiError instanceof Error ? rapidApiError.message : String(rapidApiError)}.`
-          );
-        }
-      }
-      throw fallbackFailure;
+
+    // --- TABS 2, 3, 4: YAHOO PROXY WORKER ---
+    const res = await fetch(`https://trading-proxy.armenavetisyan-sa.workers.dev?symbol=${encodeURIComponent(ticker)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    if (section === 'fundamentals') {
+      const val = data.valuation || {};
+      const fh = data.financialHealth || {};
+      
+      content.innerHTML = `
+        <div class="p-3 bg-slate-950/60 rounded border border-slate-800 space-y-3 font-mono text-xs mt-2">
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div class="bg-slate-900/70 p-2 rounded border border-slate-800/80">
+              <span class="text-[10px] text-slate-500 uppercase block">Trailing P/E</span>
+              <span class="text-white font-bold">${val.peTrailing ? Number(val.peTrailing).toFixed(2) : '—'}</span>
+            </div>
+            <div class="bg-slate-900/70 p-2 rounded border border-slate-800/80">
+              <span class="text-[10px] text-slate-500 uppercase block">Forward P/E</span>
+              <span class="text-white font-bold">${val.peForward ? Number(val.peForward).toFixed(2) : '—'}</span>
+            </div>
+            <div class="bg-slate-900/70 p-2 rounded border border-slate-800/80">
+              <span class="text-[10px] text-slate-500 uppercase block">PEG Ratio</span>
+              <span class="text-white font-bold">${val.pegRatio ?? '—'}</span>
+            </div>
+            <div class="bg-slate-900/70 p-2 rounded border border-slate-800/80">
+              <span class="text-[10px] text-slate-500 uppercase block">Short % Float</span>
+              <span class="text-amber-400 font-bold">${val.shortPercentOfFloat ?? '—'}</span>
+            </div>
+            <div class="bg-slate-900/70 p-2 rounded border border-slate-800/80">
+              <span class="text-[10px] text-slate-500 uppercase block">Profit Margin</span>
+              <span class="text-white font-bold">${fh.profitMargin ?? '—'}</span>
+            </div>
+            <div class="bg-slate-900/70 p-2 rounded border border-slate-800/80">
+              <span class="text-[10px] text-slate-500 uppercase block">ROE</span>
+              <span class="text-white font-bold">${fh.returnOnEquity ?? '—'}</span>
+            </div>
+            <div class="bg-slate-900/70 p-2 rounded border border-slate-800/80">
+              <span class="text-[10px] text-slate-500 uppercase block">Price to Book</span>
+              <span class="text-white font-bold">${val.priceToBook ?? '—'}</span>
+            </div>
+            <div class="bg-slate-900/70 p-2 rounded border border-slate-800/80">
+              <span class="text-[10px] text-slate-500 uppercase block">Total Debt</span>
+              <span class="text-rose-400 font-bold">${fh.totalDebt ? '$' + (fh.totalDebt / 1e9).toFixed(2) + 'B' : '—'}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    } 
+    else if (section === 'analysts') {
+      const t = data.analystTargets || {};
+      const upDown = data.upgradesDowngrades || [];
+      
+      let udHtml = upDown.length > 0 
+        ? upDown.slice(0, 4).map(u => `
+            <div class="flex justify-between items-center border-b border-slate-800/60 py-1.5 last:border-0">
+              <span class="text-slate-300">${u.firm}</span>
+              <span class="text-[10px] font-bold ${u.action === 'up' ? 'text-emerald-400' : u.action === 'down' ? 'text-rose-400' : 'text-cyan-400'}">${u.action.toUpperCase()}: ${u.fromGrade || ''} ➝ ${u.toGrade || ''}</span>
+            </div>`).join('') 
+        : '<div class="text-slate-500">No recent actions</div>';
+
+      content.innerHTML = `
+        <div class="p-3 bg-slate-950/60 rounded border border-slate-800 space-y-3 font-mono text-xs mt-2">
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 border-b border-slate-800/60 pb-3">
+            <div><span class="text-slate-500 block text-[10px]">Mean Target</span><span class="text-emerald-400 font-bold">$${t.mean ? t.mean.toFixed(2) : '—'}</span></div>
+            <div><span class="text-slate-500 block text-[10px]">High Target</span><span class="text-emerald-400 font-bold">$${t.high ? t.high.toFixed(2) : '—'}</span></div>
+            <div><span class="text-slate-500 block text-[10px]">Low Target</span><span class="text-rose-400 font-bold">$${t.low ? t.low.toFixed(2) : '—'}</span></div>
+            <div><span class="text-slate-500 block text-[10px]">Consensus</span><span class="text-cyan-300 font-bold uppercase">${t.consensusRecommendation || '—'}</span></div>
+          </div>
+          <div>
+            <span class="text-[10px] text-slate-500 uppercase block mb-2">Recent Firm Actions</span>
+            ${udHtml}
+          </div>
+        </div>
+      `;
     }
-  } catch (error) {
-    if (requestId !== insightRequestId) return;
-    setMarketInsightsStatus('Could not load data', 'error');
-    renderMarketInsightAccessError(section, error, ticker);
-  } finally {
-    if (requestId === insightRequestId) {
-      refreshButton.disabled = false;
-      content.setAttribute('aria-busy', 'false');
+    else if (section === 'earnings') {
+      const cal = data.calendar || {};
+      const eh = data.earningsHistory || [];
+      
+      let ehHtml = eh.length > 0 
+        ? eh.map(e => `
+            <div class="flex justify-between items-center border-b border-slate-800/60 py-1.5 last:border-0">
+              <span class="text-slate-300 font-bold">${e.quarter}</span>
+              <span class="text-[10px]">Est: ${e.epsEstimate} | Act: <span class="${e.epsDifference >= 0 ? 'text-emerald-400' : 'text-rose-400'} font-bold">${e.epsActual}</span> (${e.surprisePercent})</span>
+            </div>`).join('') 
+        : '<div class="text-slate-500">No recent earnings history</div>';
+
+      content.innerHTML = `
+        <div class="p-3 bg-slate-950/60 rounded border border-slate-800 space-y-3 font-mono text-xs mt-2">
+          <div class="bg-slate-900/70 p-2.5 rounded border border-slate-800/80 mb-3">
+            <span class="text-[10px] text-slate-500 uppercase block">Next Earnings Date</span>
+            <span class="text-purple-300 font-bold text-sm">${cal.earningsDate || 'TBD'}</span>
+          </div>
+          <div>
+            <span class="text-[10px] text-slate-500 uppercase block mb-2">Past Earnings Surprises</span>
+            ${ehHtml}
+          </div>
+        </div>
+      `;
     }
+
+  } catch (err) {
+    content.innerHTML = `<div class="py-3 text-rose-400 text-xs">Failed to load insights: ${err.message}</div>`;
   }
 }
 
@@ -2610,6 +2728,20 @@ async function fetchLivePriceFromProviders(symbol) {
   const alphaVantageKey = localStorage.getItem('alpha_vantage_api_key') || '';
   const twelveDataKey = localStorage.getItem('twelve_data_api_key') || '';
   const rapidApiKey = localStorage.getItem('rapidapi_yahoo_key') || '';
+
+  // 1. ABSOLUTE PRIORITY: Your Cloudflare Yahoo Proxy
+  try {
+    const res = await fetch(`https://trading-proxy.armenavetisyan-sa.workers.dev?symbol=${encodeURIComponent(symbol)}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.price?.current > 0) {
+        price = data.price.current;
+        sourceName = "Yahoo Proxy";
+      }
+    }
+  } catch (e) {
+    console.warn(`[Yahoo Proxy Quote Error]:`, e.message);
+  }
 
   let rapidApiQuote = null;
   if (rapidApiKey) {
