@@ -197,9 +197,10 @@ export default {
                 }
 
                 // Push / Save Gist State
+                // Push / Save Gist State
                 if (request.method === "POST") {
-                    // Await the body extraction to ensure we send a raw string, not a Promise object
-                    const bodyPayload = await request.text();
+                    // You must await request.text() here to extract the actual string payload from the request stream
+                    const bodyText = await request.text();
 
                     const ghRes = await fetch(`https://api.github.com/gists/${encodeURIComponent(gistId)}`, {
                         method: "PATCH",
@@ -207,9 +208,8 @@ export default {
                             ...ghHeaders,
                             "Content-Type": "application/json"
                         },
-                        body: bodyPayload
+                        body: bodyText
                     });
-
                     const data = await ghRes.json();
                     return new Response(JSON.stringify(data), {
                         status: ghRes.status,
