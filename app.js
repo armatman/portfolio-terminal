@@ -402,25 +402,27 @@ async function pullCloudAndRewriteLocal() {
 }
 
 function loadSavedState() {
-  const savedGistId = localStorage.getItem("github_gist_id");
-  const gistInput = document.getElementById("gistIdInput");
+  // 1. ADD THIS BLOCK to auto-fill the Gist ID:
+  const savedGistId = localStorage.getItem('github_gist_id');
+  const gistInput = document.getElementById('gistIdInput');
   if (savedGistId && gistInput) {
     gistInput.value = savedGistId;
   }
 
-  const rawState = localStorage.getItem("portfolio_state");
-  if (rawState) {
+  // 2. Existing portfolio state loading logic:
+  const raw = localStorage.getItem('portfolio_state');
+  if (raw) {
     try {
-      const parsed = JSON.parse(rawState);
-      if (parsed && typeof parsed === "object") {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
         state = {
           ...state,
           ...parsed,
           positions: parsed.positions || state.positions
         };
       }
-    } catch (err) {
-      console.warn("Failed to parse saved portfolio state:", err);
+    } catch (e) {
+      console.warn('Failed to parse saved state:', e);
     }
   }
 }
@@ -3431,10 +3433,17 @@ async function executeCommand() {
 async function initApp() {
   await loadSavedState();
 
+  // Pull latest cloud data on startup if the user has a saved Gist ID
+  const savedGistId = localStorage.getItem('github_gist_id');
+  if (savedGistId) {
+    await pullCloudAndRewriteLocal();
+  }
+
   const credentialsConfigured = areHeaderCredentialsConfigured();
   headerCredentialsHidden = credentialsConfigured || localStorage.getItem('header_credentials_hidden') === 'true';
 
-  ['apiKeyInput', 'finnhubKeyInput', 'alphaVantageKeyInput', 'twelveDataKeyInput', 'rapidApiKeyInput', 'gistIdInput', 'githubTokenInput'].forEach(id => {
+  // Stripped out all the removed client-side API key inputs, leaving only the Gist ID
+  ['gistIdInput'].forEach(id => {
     document.getElementById(id)?.addEventListener('input', updateHeaderCredentialsVisibility);
   });
 
