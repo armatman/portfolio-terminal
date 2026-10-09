@@ -69,13 +69,28 @@ export default {
 
             // --- ACTION 2: Gemini AI Chat / Intent Routing ---
             if (action === "gemini") {
-                const geminiKey = env.GEMINI_KEY || env.GEMINI_API_KEY;
-                const body = await request.json();
-                const model = body.model || "gemini-1.5-flash";
+                const geminiKey = env.GEMINI_KEY || env.GEMINI_API_KEY || env.GOOGLE_API_KEY;
+                if (!geminiKey) {
+                    return new Response(JSON.stringify({
+                        error: "Gemini key is missing from Worker environment variables. Set GEMINI_KEY in Cloudflare settings."
+                    }), { status: 500, headers: corsHeaders });
+                }
+
+                const body = await request.json().catch(() => ({}));
                 const prompt = body.prompt;
+                if (!prompt) {
+                    return new Response(JSON.stringify({ error: "Missing 'prompt' in request body." }), {
+                        status: 400,
+                        headers: corsHeaders
+                    });
+                }
+
+                // Clean model name and ensure 'models/' prefix is present
+                let rawModel = body.model || "gemini-2.5-flash";
+                const modelName = rawModel.startsWith("models/") ? rawModel : `models/${rawModel}`;
 
                 const res = await fetch(
-                    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+                    `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${encodeURIComponent(geminiKey.trim())}`,
                     {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
@@ -84,8 +99,12 @@ export default {
                         })
                     }
                 );
+
                 const data = await res.json();
-                return new Response(JSON.stringify(data), { headers: corsHeaders });
+                return new Response(JSON.stringify(data), {
+                    status: res.status,
+                    headers: corsHeaders
+                });
             }
 
             // --- ACTION 3: Fallback Provider Quote (Finnhub / TwelveData) ---
