@@ -1,3 +1,34 @@
+const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
+
+/**
+ * Obtains an ephemeral Yahoo session cookie and authorization crumb.
+ */
+async function getYahooCredentials() {
+    // Step 1: Hit fc.yahoo.com to acquire the initial session cookie
+    const initRes = await fetch("https://fc.yahoo.com", {
+        headers: { "User-Agent": USER_AGENT }
+    });
+
+    const rawCookie = initRes.headers.get("set-cookie") || "";
+    const cookieMatch = rawCookie.match(/(A[13]=[^;]+)/);
+    const cookie = cookieMatch ? cookieMatch[1] : "";
+
+    // Step 2: Use the cookie to request the session crumb
+    const crumbRes = await fetch("https://query1.finance.yahoo.com/v1/test/getcrumb", {
+        headers: {
+            "User-Agent": USER_AGENT,
+            "Cookie": cookie
+        }
+    });
+
+    if (!crumbRes.ok) {
+        throw new Error(`Failed to acquire Yahoo crumb (HTTP ${crumbRes.status})`);
+    }
+
+    const crumb = await crumbRes.text();
+    return { cookie, crumb: crumb.trim() };
+}
+
 export default {
     async fetch(request, env) {
         // 1. Handle CORS Preflight
@@ -82,10 +113,16 @@ export default {
                 });
             }
 
-            // Existing Yahoo Finance scraping/proxy logic:
-            const yahooUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=price,summaryDetail,defaultKeyStatistics,financialData,recommendationTrend,upgradeDowngradeHistory,calendarEvents`;
+            // Obtain session credentials
+            const { cookie, crumb } = await getYahooCredentials();
+
+            const yahooUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=price,summaryDetail,defaultKeyStatistics,financialData,recommendationTrend,upgradeDowngradeHistory,calendarEvents&crumb=${encodeURIComponent(crumb)}`;
+
             const response = await fetch(yahooUrl, {
-                headers: { "User-Agent": "Mozilla/5.0" }
+                headers: {
+                    "User-Agent": USER_AGENT,
+                    "Cookie": cookie
+                }
             });
 
             if (!response.ok) {
@@ -95,7 +132,6 @@ export default {
             const raw = await response.json();
             const result = raw.quoteSummary?.result?.[0] || {};
 
-            // Normalized response object for the app
             const payload = {
                 symbol,
                 price: {
