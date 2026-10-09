@@ -363,41 +363,50 @@ async function pullStateFromGistOnLoad() {
 async function pullCloudAndRewriteLocal() {
   const gistId = extractCleanGistId(document.getElementById('gistIdInput').value.trim());
 
-  if (!gistId) return;
+  if (!gistId) {
+    showToast('Configure Gist ID before pulling cloud state.', 'error');
+    return false;
+  }
 
-  const payload = {
-    description: 'Portfolio State Update',
-    files: {
-      'portfolio-state.json': {
-        content: JSON.stringify(state, null, 2)
-      }
-    }
-  };
+  showToast('Pulling portfolio from cloud...', 'info');
 
   try {
-    const res = await fetch(`${YAHOO_PROXY_URL}?action=gist&gistId=${encodeURIComponent(gistId)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-
+    const res = await fetch(`${YAHOO_PROXY_URL}?action=gist&gistId=${encodeURIComponent(gistId)}`);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.message || err.error || `HTTP ${res.status}`);
     }
 
-    const syncEl = document.getElementById('cloudSyncStatus');
-    if (syncEl) {
-      syncEl.textContent = `Synced: ${new Date().toLocaleTimeString()}`;
-      syncEl.className = 'text-[10px] text-emerald-400 font-mono';
+    const data = await res.json();
+    
+    // Fallback logic to grab the first file if portfolio-state.json is missing
+    const file = data.files?.['portfolio-state.json'] || Object.values(data.files || {})[0];
+
+    if (!file || !file.content) {
+      throw new Error('Gist state payload was empty or missing content.');
     }
+
+    // Protect against the "[object Promise]" bug that corrupted the JSON string earlier
+    if (file.content === "[object Promise]") {
+       throw new Error('Gist data is corrupted. Please manually fix the Gist in GitHub.');
+    }
+
+    const parsedState = JSON.parse(file.content);
+    if (!parsedState || typeof parsedState !== 'object') {
+      throw new Error('Invalid JSON structure inside gist state file');
+    }
+
+    localStorage.setItem('portfolio_state', JSON.stringify(parsedState));
+    loadSavedState();
+    renderAll();
+    showToast('Cloud state pulled and applied.', 'success');
+    logTerminal(`[Cloud]: Synced successfully from Gist ${gistId}.`);
+    return true;
   } catch (err) {
-    console.error('Failed to sync to cloud:', err);
-    const syncEl = document.getElementById('cloudSyncStatus');
-    if (syncEl) {
-      syncEl.textContent = 'Sync failed';
-      syncEl.className = 'text-[10px] text-rose-400 font-mono';
-    }
+    console.error('Failed to pull cloud state:', err);
+    showToast(`Failed to pull cloud state: ${err.message}`, 'error');
+    logTerminal(`[Cloud Error]: Failed to pull from Gist (${err.message})`);
+    return false;
   }
 }
 

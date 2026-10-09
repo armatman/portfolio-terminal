@@ -160,6 +160,7 @@ export default {
             }
 
             // --- ACTION 4: GitHub Gist Storage Proxy ---
+            // --- ACTION 4: GitHub Gist Storage Proxy ---
             if (action === "gist") {
                 const githubToken = env.GITHUB_KEY || env.GITHUB_TOKEN || env.GITHUB_PAT;
                 if (!githubToken) {
@@ -197,15 +198,18 @@ export default {
 
                 // Push / Save Gist State
                 if (request.method === "POST") {
-                    const body = await request.text();
+                    // Await the body extraction to ensure we send a raw string, not a Promise object
+                    const bodyPayload = await request.text();
+
                     const ghRes = await fetch(`https://api.github.com/gists/${encodeURIComponent(gistId)}`, {
                         method: "PATCH",
                         headers: {
                             ...ghHeaders,
                             "Content-Type": "application/json"
                         },
-                        body: body
+                        body: bodyPayload
                     });
+
                     const data = await ghRes.json();
                     return new Response(JSON.stringify(data), {
                         status: ghRes.status,
