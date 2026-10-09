@@ -67,7 +67,7 @@ export default {
                 return new Response(JSON.stringify(data), { headers: corsHeaders });
             }
 
-            // --- ACTION 2: Gemini AI Chat / Intent Routing ---
+            // --- ACTION 2: Gemini AI Chat / Intent Routing & Auto Discovery ---
             if (action === "gemini") {
                 const geminiKey = env.GEMINI_KEY || env.GEMINI_API_KEY || env.GOOGLE_API_KEY;
                 if (!geminiKey) {
@@ -78,15 +78,20 @@ export default {
 
                 const body = await request.json().catch(() => ({}));
                 const prompt = body.prompt;
-                if (!prompt) {
-                    return new Response(JSON.stringify({ error: "Missing 'prompt' in request body." }), {
-                        status: 400,
-                        headers: corsHeaders
-                    });
+
+                // Auto-check available models if prompt is absent or explicitly requested
+                if (!prompt || body.checkModels) {
+                    const listRes = await fetch(
+                        `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(geminiKey.trim())}`
+                    );
+                    const listData = await listRes.json();
+                    return new Response(JSON.stringify({
+                        notice: "No prompt provided. Returning active models available to this key.",
+                        ...listData
+                    }), { status: listRes.status, headers: corsHeaders });
                 }
 
-                // Clean model name and ensure 'models/' prefix is present
-                let rawModel = body.model || "gemini-2.5-flash";
+                let rawModel = body.model || "gemini-3.8-flash";
                 const modelName = rawModel.startsWith("models/") ? rawModel : `models/${rawModel}`;
 
                 const res = await fetch(
