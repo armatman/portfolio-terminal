@@ -401,51 +401,28 @@ async function pullCloudAndRewriteLocal() {
   }
 }
 
-async function loadSavedState() {
-  loadTradernetRules();
-  localStorage.removeItem('gemini_api_key');
-  const savedGeminiKey = sessionStorage.getItem('gemini_api_key');
-  if (savedGeminiKey) document.getElementById('apiKeyInput').value = savedGeminiKey;
-
-  const savedFinnhub = localStorage.getItem('finnhub_api_key');
-  if (savedFinnhub) document.getElementById('finnhubKeyInput').value = savedFinnhub;
-
-  const savedAlphaVantage = localStorage.getItem('alpha_vantage_api_key');
-  if (savedAlphaVantage) document.getElementById('alphaVantageKeyInput').value = savedAlphaVantage;
-
-  const savedTwelveData = localStorage.getItem('twelve_data_api_key');
-  if (savedTwelveData) document.getElementById('twelveDataKeyInput').value = savedTwelveData;
-
-  const savedRapidApi = localStorage.getItem('rapidapi_yahoo_key');
-  if (savedRapidApi) document.getElementById('rapidApiKeyInput').value = savedRapidApi;
-
-  localStorage.removeItem('fmp_api_key');
-
-  /* const savedGistId = localStorage.getItem('github_gist_id');
-  if (savedGistId) document.getElementById('gistIdInput').value = savedGistId;
-
-  const savedToken = localStorage.getItem('github_pat_token');
-  if (savedToken) document.getElementById('githubTokenInput').value = savedToken;
-  */
-
-  const pulled = await pullStateFromGistOnLoad();
-  if (!pulled) {
-    const saved = localStorage.getItem('margin_portfolio_state_dynamic_v2');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object') {
-          state = normalizePortfolioState(parsed);
-        }
-      } catch (error) {
-        logTerminal(`[Local State Error]: Could not load saved portfolio (${error.message}). Starting with defaults.`);
-      }
-    }
+function loadSavedState() {
+  const savedGistId = localStorage.getItem("github_gist_id");
+  const gistInput = document.getElementById("gistIdInput");
+  if (savedGistId && gistInput) {
+    gistInput.value = savedGistId;
   }
 
-  verifyTradernetRulesOnload();
-  applyOvernightRollover();
-  renderBoard();
+  const rawState = localStorage.getItem("portfolio_state");
+  if (rawState) {
+    try {
+      const parsed = JSON.parse(rawState);
+      if (parsed && typeof parsed === "object") {
+        state = {
+          ...state,
+          ...parsed,
+          positions: parsed.positions || state.positions
+        };
+      }
+    } catch (err) {
+      console.warn("Failed to parse saved portfolio state:", err);
+    }
+  }
 }
 
 let headerCredentialsHidden = false;
@@ -498,16 +475,19 @@ function resetToBlankState() {
 }
 
 async function saveApiKeys() {
-  const rawGist = document.getElementById('gistIdInput').value.trim();
+  const rawGist = document.getElementById("gistIdInput")?.value.trim() || "";
   const cleanGistId = extractCleanGistId(rawGist);
-  localStorage.setItem('github_gist_id', cleanGistId);
 
-  logTerminal("[System]: Gist ID saved.");
-  showToast('Gist ID updated.', 'success');
-
-  if (cleanGistId) {
-    await pullCloudAndRewriteLocal();
+  if (!cleanGistId) {
+    showToast("Please enter a valid Gist ID.", "error");
+    return;
   }
+
+  localStorage.setItem("github_gist_id", cleanGistId);
+  logTerminal("[System]: Gist ID saved.");
+  showToast("Gist ID saved.", "success");
+
+  await pullCloudAndRewriteLocal();
 }
 
 function calcCommission(shares, totalVal) {
@@ -3449,7 +3429,7 @@ async function executeCommand() {
 }
 
 async function initApp() {
-  // await loadSavedState();
+  await loadSavedState();
 
   const credentialsConfigured = areHeaderCredentialsConfigured();
   headerCredentialsHidden = credentialsConfigured || localStorage.getItem('header_credentials_hidden') === 'true';
