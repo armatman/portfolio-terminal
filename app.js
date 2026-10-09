@@ -422,7 +422,7 @@ async function pullCloudAndRewriteLocal() {
     loadSavedState();
 
     showToast('Cloud state pulled and applied.', 'success');
-    logTerminal(`[Cloud]: Synced successfully from Gist ${gistId}.`);
+    logTerminal(`[Cloud]: Synced successfully.`);
 
     return true;
   } catch (err) {
@@ -461,20 +461,12 @@ function loadSavedState() {
 
 let headerCredentialsHidden = false;
 
-function areHeaderCredentialsConfigured() {
-  return document.getElementById('gistIdInput').value.trim().length > 0;
-}
-
 function updateHeaderCredentialsVisibility() {
-  const allFieldsFilled = areHeaderCredentialsConfigured();
   const fields = document.getElementById('headerCredentialsFields');
   const toggleButton = document.getElementById('toggleHeaderCredentialsButton');
   const saveButton = document.getElementById('saveApiKeysButton');
 
-  if (!allFieldsFilled) headerCredentialsHidden = false;
-
   fields.classList.toggle('hidden', headerCredentialsHidden);
-  toggleButton.classList.toggle('hidden', !allFieldsFilled);
   saveButton.classList.toggle('hidden', headerCredentialsHidden);
 
   toggleButton.textContent = headerCredentialsHidden ? 'Show keys' : 'Hide keys';
@@ -3499,8 +3491,7 @@ async function initApp() {
     document.getElementById(id)?.addEventListener('input', updateHeaderCredentialsVisibility);
   });
 
-  const credentialsConfigured = areHeaderCredentialsConfigured();
-  headerCredentialsHidden = credentialsConfigured || localStorage.getItem('header_credentials_hidden') === 'true';
+  headerCredentialsHidden = localStorage.getItem('header_credentials_hidden') === 'true';
 
   // Stripped out all the removed client-side API key inputs, leaving only the Gist ID
   ['gistIdInput'].forEach(id => {
@@ -3530,9 +3521,7 @@ async function initApp() {
   document.getElementById('marketInsightsTabs')?.addEventListener('keydown', handleMarketInsightsTabKeydown);
 
   updateHeaderCredentialsVisibility();
-  if (credentialsConfigured) {
-    document.getElementById('mainDeskContainer')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
+  document.getElementById('mainDeskContainer')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   // Initial render from local/gist state, then pull live quotes
   renderBoard();
