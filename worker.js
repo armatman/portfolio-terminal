@@ -67,7 +67,7 @@ export default {
                 return new Response(JSON.stringify(data), { headers: corsHeaders });
             }
 
-            // --- ACTION 2: Gemini AI Chat / Intent Routing & Auto Discovery ---
+            // --- ACTION 2: Gemini AI Chat / Intent Routing & Auto Fallback ---
             if (action === "gemini") {
                 const geminiKey = env.GEMINI_KEY || env.GEMINI_API_KEY || env.GOOGLE_API_KEY;
                 if (!geminiKey) {
@@ -91,23 +91,62 @@ export default {
                     }), { status: listRes.status, headers: corsHeaders });
                 }
 
-                let rawModel = body.model || "gemini-3.8-flash";
-                const modelName = rawModel.startsWith("models/") ? rawModel : `models/${rawModel}`;
+                // Ordered fallback list of lightweight flash models
+                const candidateModels = [
+                    body.model || "gemini-2.5-flash",
+                    "gemini-2.0-flash",
+                    "gemini-2.0-flash-lite",
+                    "gemini-1.5-flash"
+                ];
 
-                const res = await fetch(
-                    `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${encodeURIComponent(geminiKey.trim())}`,
-                    {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            contents: [{ parts: [{ text: prompt }] }]
-                        })
+                let lastResponse = null;
+                let lastData = null;
+
+                for (const rawModel of candidateModels) {
+                    const modelName = rawModel.startsWith("models/") ? rawModel : `models/${rawModel}`;
+
+                    try {
+                        const res = await fetch(
+                            `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${encodeURIComponent(geminiKey.trim())}`,
+                            {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                    contents: [{ parts: [{ text: prompt }] }]
+                                })
+                            }
+                        );
+
+                        const data = await res.json();
+
+                        // If successful (HTTP 200), return immediately
+                        if (res.ok) {
+                            return new Response(JSON.stringify(data), {
+                                status: 200,
+                                headers: corsHeaders
+                            });
+                        }
+
+                        // Save last failure state
+                        lastResponse = res;
+                        lastData = data;
+
+                        // If it's a 503 (high demand) or 429 (rate limit), continue to next candidate model
+                        if (res.status === 503 || res.status === 429 || res.status === 404) {
+                            console.warn(`[Gemini Proxy Warning]: Model ${modelName} returned ${res.status}. Falling back to next model...`);
+                            continue;
+                        }
+
+                        // For other client errors (e.g. 400 Bad Request, invalid syntax), stop immediately
+                        break;
+                    } catch (err) {
+                        console.error(`[Gemini Fetch Error]:`, err);
                     }
-                );
+                }
 
-                const data = await res.json();
-                return new Response(JSON.stringify(data), {
-                    status: res.status,
+                // Return the last error if all candidate models failed
+                return new Response(JSON.stringify(lastData || { error: "All candidate models unavailable." }), {
+                    status: lastResponse ? lastResponse.status : 500,
                     headers: corsHeaders
                 });
             }
