@@ -361,15 +361,43 @@ async function pullStateFromGistOnLoad() {
 }
 
 async function pullCloudAndRewriteLocal() {
-  logTerminal("[System]: Fetching cloud data from GitHub Gist...");
-  const success = await pullStateFromGistOnLoad();
-  if (success) {
-    verifyTradernetRulesOnload();
-    applyOvernightRollover();
-    renderBoard();
-    logTerminal("[System]: Local data rewritten with cloud state successfully.");
-  } else {
-    logTerminal("[Error]: Failed to pull cloud data. Check Gist ID / Token.");
+  const gistId = extractCleanGistId(document.getElementById('gistIdInput').value.trim());
+
+  if (!gistId) return;
+
+  const payload = {
+    description: 'Portfolio State Update',
+    files: {
+      'portfolio-state.json': {
+        content: JSON.stringify(state, null, 2)
+      }
+    }
+  };
+
+  try {
+    const res = await fetch(`${YAHOO_PROXY_URL}?action=gist&gistId=${encodeURIComponent(gistId)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || err.error || `HTTP ${res.status}`);
+    }
+
+    const syncEl = document.getElementById('cloudSyncStatus');
+    if (syncEl) {
+      syncEl.textContent = `Synced: ${new Date().toLocaleTimeString()}`;
+      syncEl.className = 'text-[10px] text-emerald-400 font-mono';
+    }
+  } catch (err) {
+    console.error('Failed to sync to cloud:', err);
+    const syncEl = document.getElementById('cloudSyncStatus');
+    if (syncEl) {
+      syncEl.textContent = 'Sync failed';
+      syncEl.className = 'text-[10px] text-rose-400 font-mono';
+    }
   }
 }
 
@@ -423,8 +451,7 @@ async function loadSavedState() {
 let headerCredentialsHidden = false;
 
 function areHeaderCredentialsConfigured() {
-  return ['gistIdInput', 'githubTokenInput']
-    .every(id => document.getElementById(id).value.trim().length > 0);
+  return document.getElementById('gistIdInput').value.trim().length > 0;
 }
 
 function updateHeaderCredentialsVisibility() {
@@ -475,11 +502,8 @@ async function saveApiKeys() {
   const cleanGistId = extractCleanGistId(rawGist);
   localStorage.setItem('github_gist_id', cleanGistId);
 
-  const token = document.getElementById('githubTokenInput').value.trim();
-  localStorage.setItem('github_pat_token', token);
-
-  logTerminal("[System]: Gist credentials saved.");
-  showToast('Gist credentials updated.', 'success');
+  logTerminal("[System]: Gist ID saved.");
+  showToast('Gist ID updated.', 'success');
 
   if (cleanGistId) {
     await pullCloudAndRewriteLocal();

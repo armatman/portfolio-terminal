@@ -159,6 +159,66 @@ export default {
                 }
             }
 
+            // --- ACTION 4: GitHub Gist Storage Proxy ---
+            if (action === "gist") {
+                const githubToken = env.GITHUB_KEY || env.GITHUB_TOKEN || env.GITHUB_PAT;
+                if (!githubToken) {
+                    return new Response(JSON.stringify({
+                        error: "GITHUB_KEY is missing from Worker environment variables. Set GITHUB_KEY in Cloudflare settings."
+                    }), { status: 500, headers: corsHeaders });
+                }
+
+                const gistId = url.searchParams.get("gistId");
+                if (!gistId) {
+                    return new Response(JSON.stringify({ error: "Missing required 'gistId' parameter." }), {
+                        status: 400,
+                        headers: corsHeaders
+                    });
+                }
+
+                const ghHeaders = {
+                    "Accept": "application/vnd.github+json",
+                    "Authorization": `Bearer ${githubToken.trim()}`,
+                    "X-GitHub-Api-Version": "2022-11-28",
+                    "User-Agent": USER_AGENT
+                };
+
+                // Pull Gist State
+                if (request.method === "GET") {
+                    const ghRes = await fetch(`https://api.github.com/gists/${encodeURIComponent(gistId)}`, {
+                        headers: ghHeaders
+                    });
+                    const data = await ghRes.json();
+                    return new Response(JSON.stringify(data), {
+                        status: ghRes.status,
+                        headers: corsHeaders
+                    });
+                }
+
+                // Push / Save Gist State
+                if (request.method === "POST") {
+                    const body = await request.text();
+                    const ghRes = await fetch(`https://api.github.com/gists/${encodeURIComponent(gistId)}`, {
+                        method: "PATCH",
+                        headers: {
+                            ...ghHeaders,
+                            "Content-Type": "application/json"
+                        },
+                        body: body
+                    });
+                    const data = await ghRes.json();
+                    return new Response(JSON.stringify(data), {
+                        status: ghRes.status,
+                        headers: corsHeaders
+                    });
+                }
+
+                return new Response(JSON.stringify({ error: "Method not allowed for gist action." }), {
+                    status: 405,
+                    headers: corsHeaders
+                });
+            }
+
             // --- DEFAULT ACTION: Yahoo Deep Stock Data & Live Quotes ---
             if (!symbol) {
                 return new Response(JSON.stringify({ error: "Missing required 'symbol' or 'action' parameter." }), {
