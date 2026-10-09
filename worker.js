@@ -67,7 +67,7 @@ export default {
                 return new Response(JSON.stringify(data), { headers: corsHeaders });
             }
 
-            // --- ACTION 2: Gemini AI Chat / Intent Routing with Dynamic Model Resolution ---
+            // --- ACTION 2: Gemini AI Chat / Intent Routing ---
             if (action === "gemini") {
                 const geminiKey = env.GEMINI_KEY || env.GEMINI_API_KEY || env.GOOGLE_API_KEY;
                 if (!geminiKey) {
@@ -79,71 +79,65 @@ export default {
                 const body = await request.json().catch(() => ({}));
                 const prompt = body.prompt;
 
-                // 1. Fetch live models available to this specific API key
-                const modelsRes = await fetch(
-                    `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(geminiKey.trim())}`
-                );
-
-                if (!modelsRes.ok) {
-                    const errData = await modelsRes.json().catch(() => ({}));
-                    return new Response(JSON.stringify({
-                        error: `Failed to fetch available models from Google: ${errData.error?.message || modelsRes.statusText}`
-                    }), { status: modelsRes.status, headers: corsHeaders });
+                if (!prompt) {
+                    return new Response(JSON.stringify({ error: "Missing 'prompt' in request body." }), {
+                        status: 400,
+                        headers: corsHeaders
+                    });
                 }
 
-                const modelsData = await modelsRes.json();
-                const availableModels = (modelsData.models || []).filter(m =>
-                    Array.isArray(m.supportedGenerationMethods) &&
-                    m.supportedGenerationMethods.includes("generateContent")
-                );
+                // High-allowance Lite models (500 RPD) prioritized over 20 RPD tier models
+                const candidateModels = [
+                    body.model || "gemini-3.5-flash-lite",
+                    "gemini-3.1-flash-lite",
+                    "gemini-3.7-flash",
+                    "gemini-3.6-flash"
+                ];
 
-                if (availableModels.length === 0) {
-                    return new Response(JSON.stringify({
-                        error: "No active models supporting generateContent found for this API key.",
-                        raw: modelsData
-                    }), { status: 500, headers: corsHeaders });
-                }
+                let lastResponse = null;
+                let lastData = null;
 
-                // If no prompt provided or explicitly asked to list, return discovery info
-                if (!prompt || body.checkModels) {
-                    return new Response(JSON.stringify({
-                        notice: "Returning models supporting generateContent for this key.",
-                        count: availableModels.length,
-                        models: availableModels.map(m => m.name)
-                    }), { status: 200, headers: corsHeaders });
-                }
+                for (const rawModel of candidateModels) {
+                    const modelName = rawModel.startsWith("models/") ? rawModel : `models/${rawModel}`;
 
-                // 2. Select target model: requested model -> best flash match -> first supported model
-                let selectedModel = null;
-                if (body.model) {
-                    const reqName = body.model.startsWith("models/") ? body.model : `models/${body.model}`;
-                    selectedModel = availableModels.find(m => m.name === reqName)?.name;
-                }
+                    try {
+                        const res = await fetch(
+                            `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${encodeURIComponent(geminiKey.trim())}`,
+                            {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                    contents: [{ parts: [{ text: prompt }] }]
+                                })
+                            }
+                        );
 
-                if (!selectedModel) {
-                    // Prioritize flash variants, sorted in reverse to pick the newest revision
-                    const flashModel = availableModels
-                        .filter(m => m.name.includes("flash"))
-                        .sort((a, b) => b.name.localeCompare(a.name))[0];
+                        const data = await res.json();
 
-                    selectedModel = flashModel ? flashModel.name : availableModels[0].name;
-                }
+                        if (res.ok) {
+                            return new Response(JSON.stringify(data), {
+                                status: 200,
+                                headers: corsHeaders
+                            });
+                        }
 
-                // 3. Execute generation query
-                const generateRes = await fetch(
-                    `https://generativelanguage.googleapis.com/v1beta/${selectedModel}:generateContent?key=${encodeURIComponent(geminiKey.trim())}`,
-                    {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            contents: [{ parts: [{ text: prompt }] }]
-                        })
+                        lastResponse = res;
+                        lastData = data;
+
+                        // Continue through the list if throttled, quota-exhausted, or under high load
+                        if (res.status === 503 || res.status === 429 || res.status === 404) {
+                            console.warn(`[Gemini Proxy]: ${modelName} returned HTTP ${res.status}. Trying next candidate...`);
+                            continue;
+                        }
+
+                        break;
+                    } catch (err) {
+                        console.error(`[Gemini Proxy Error]:`, err);
                     }
-                );
+                }
 
-                const generateData = await generateRes.json();
-                return new Response(JSON.stringify(generateData), {
-                    status: generateRes.status,
+                return new Response(JSON.stringify(lastData || { error: "All candidate models exhausted or rate-limited." }), {
+                    status: lastResponse ? lastResponse.status : 500,
                     headers: corsHeaders
                 });
             }
