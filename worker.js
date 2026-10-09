@@ -67,7 +67,7 @@ export default {
                 return new Response(JSON.stringify(data), { headers: corsHeaders });
             }
 
-            // --- ACTION 2: Gemini AI Chat / Intent Routing & Auto Fallback ---
+            // --- ACTION 2: Gemini AI Chat / Intent Routing with Dynamic Model Resolution ---
             if (action === "gemini") {
                 const geminiKey = env.GEMINI_KEY || env.GEMINI_API_KEY || env.GOOGLE_API_KEY;
                 if (!geminiKey) {
@@ -79,74 +79,71 @@ export default {
                 const body = await request.json().catch(() => ({}));
                 const prompt = body.prompt;
 
-                // Auto-check available models if prompt is absent or explicitly requested
-                if (!prompt || body.checkModels) {
-                    const listRes = await fetch(
-                        `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(geminiKey.trim())}`
-                    );
-                    const listData = await listRes.json();
+                // 1. Fetch live models available to this specific API key
+                const modelsRes = await fetch(
+                    `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(geminiKey.trim())}`
+                );
+
+                if (!modelsRes.ok) {
+                    const errData = await modelsRes.json().catch(() => ({}));
                     return new Response(JSON.stringify({
-                        notice: "No prompt provided. Returning active models available to this key.",
-                        ...listData
-                    }), { status: listRes.status, headers: corsHeaders });
+                        error: `Failed to fetch available models from Google: ${errData.error?.message || modelsRes.statusText}`
+                    }), { status: modelsRes.status, headers: corsHeaders });
                 }
 
-                // Ordered fallback list of lightweight flash models
-                const candidateModels = [
-                    body.model || "gemini-2.5-flash",
-                    "gemini-2.0-flash",
-                    "gemini-2.0-flash-lite",
-                    "gemini-1.5-flash"
-                ];
+                const modelsData = await modelsRes.json();
+                const availableModels = (modelsData.models || []).filter(m =>
+                    Array.isArray(m.supportedGenerationMethods) &&
+                    m.supportedGenerationMethods.includes("generateContent")
+                );
 
-                let lastResponse = null;
-                let lastData = null;
+                if (availableModels.length === 0) {
+                    return new Response(JSON.stringify({
+                        error: "No active models supporting generateContent found for this API key.",
+                        raw: modelsData
+                    }), { status: 500, headers: corsHeaders });
+                }
 
-                for (const rawModel of candidateModels) {
-                    const modelName = rawModel.startsWith("models/") ? rawModel : `models/${rawModel}`;
+                // If no prompt provided or explicitly asked to list, return discovery info
+                if (!prompt || body.checkModels) {
+                    return new Response(JSON.stringify({
+                        notice: "Returning models supporting generateContent for this key.",
+                        count: availableModels.length,
+                        models: availableModels.map(m => m.name)
+                    }), { status: 200, headers: corsHeaders });
+                }
 
-                    try {
-                        const res = await fetch(
-                            `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${encodeURIComponent(geminiKey.trim())}`,
-                            {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({
-                                    contents: [{ parts: [{ text: prompt }] }]
-                                })
-                            }
-                        );
+                // 2. Select target model: requested model -> best flash match -> first supported model
+                let selectedModel = null;
+                if (body.model) {
+                    const reqName = body.model.startsWith("models/") ? body.model : `models/${body.model}`;
+                    selectedModel = availableModels.find(m => m.name === reqName)?.name;
+                }
 
-                        const data = await res.json();
+                if (!selectedModel) {
+                    // Prioritize flash variants, sorted in reverse to pick the newest revision
+                    const flashModel = availableModels
+                        .filter(m => m.name.includes("flash"))
+                        .sort((a, b) => b.name.localeCompare(a.name))[0];
 
-                        // If successful (HTTP 200), return immediately
-                        if (res.ok) {
-                            return new Response(JSON.stringify(data), {
-                                status: 200,
-                                headers: corsHeaders
-                            });
-                        }
+                    selectedModel = flashModel ? flashModel.name : availableModels[0].name;
+                }
 
-                        // Save last failure state
-                        lastResponse = res;
-                        lastData = data;
-
-                        // If it's a 503 (high demand) or 429 (rate limit), continue to next candidate model
-                        if (res.status === 503 || res.status === 429 || res.status === 404) {
-                            console.warn(`[Gemini Proxy Warning]: Model ${modelName} returned ${res.status}. Falling back to next model...`);
-                            continue;
-                        }
-
-                        // For other client errors (e.g. 400 Bad Request, invalid syntax), stop immediately
-                        break;
-                    } catch (err) {
-                        console.error(`[Gemini Fetch Error]:`, err);
+                // 3. Execute generation query
+                const generateRes = await fetch(
+                    `https://generativelanguage.googleapis.com/v1beta/${selectedModel}:generateContent?key=${encodeURIComponent(geminiKey.trim())}`,
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: prompt }] }]
+                        })
                     }
-                }
+                );
 
-                // Return the last error if all candidate models failed
-                return new Response(JSON.stringify(lastData || { error: "All candidate models unavailable." }), {
-                    status: lastResponse ? lastResponse.status : 500,
+                const generateData = await generateRes.json();
+                return new Response(JSON.stringify(generateData), {
+                    status: generateRes.status,
                     headers: corsHeaders
                 });
             }
