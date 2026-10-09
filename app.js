@@ -416,13 +416,9 @@ async function pullCloudAndRewriteLocal() {
     // Trigger internal updates
     state = { ...state, ...parsedState };
     loadSavedState();
-    renderBoard();
 
     showToast('Cloud state pulled and applied.', 'success');
     logTerminal(`[Cloud]: Synced successfully from Gist ${gistId}.`);
-
-    // Refresh live pricing for the newly loaded tickers
-    setTimeout(() => refreshAllLivePrices(), 500);
 
     return true;
   } catch (err) {
@@ -521,7 +517,11 @@ async function saveApiKeys() {
   logTerminal("[System]: Gist ID saved.");
   showToast("Gist ID saved.", "success");
 
-  await pullCloudAndRewriteLocal();
+  // Pull cloud data and instantly refresh quotes if successful
+  const success = await pullCloudAndRewriteLocal();
+  if (success) {
+    await refreshAllLivePrices();
+  }
 }
 
 function calcCommission(shares, totalVal) {
