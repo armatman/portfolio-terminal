@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,17 +9,19 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script type="module" src="/src/main.ts"></script>
 </head>
+
 <body class="p-3 sm:p-4 md:p-6">
   <div id="toastContainer" class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
   <div class="max-w-6xl mx-auto space-y-5">
-    
+
     <!-- Top Bar: Status, Keys, GitHub Gist Sync, Reset & Backups -->
     <div class="border-card p-4 sm:p-5 rounded-xl space-y-4">
       <div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <div class="flex items-center gap-2 flex-wrap">
             <h1 class="text-xl font-bold text-emerald-400 tracking-wider">MARGIN DESK TERMINAL</h1>
-            <span class="bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-black px-2 py-0.5 rounded tracking-wide">
+            <span
+              class="bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-black px-2 py-0.5 rounded tracking-wide">
               BROKER MODEL
             </span>
             <!-- <span id="cloudStatusBadge" class="bg-slate-900 text-slate-400 border border-slate-700 text-[10px] font-black px-2 py-0.5 rounded tracking-wide flex items-center gap-1">
@@ -34,42 +37,59 @@
 
       <div class="space-y-3">
         <details class="rounded border border-slate-800 bg-slate-950/40 p-3">
-          <summary class="cursor-pointer text-xs font-bold text-slate-300 hover:text-cyan-300">Broker assumptions &amp; quote symbols</summary>
+          <summary class="cursor-pointer text-xs font-bold text-slate-300 hover:text-cyan-300">Broker assumptions &amp;
+            quote symbols</summary>
           <div class="mt-3 grid gap-4 lg:grid-cols-2">
             <form id="brokerRulesForm" class="space-y-2">
               <p class="text-[10px] uppercase tracking-wider text-slate-500">Margin and commission assumptions (USD)</p>
               <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 <label class="flex flex-col gap-1 text-[10px] text-slate-400">Annual margin rate (%)
-                  <input id="annualMarginRateInput" type="number" min="0" max="100" step="0.01" required inputmode="decimal" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                  <input id="annualMarginRateInput" type="number" min="0" max="100" step="0.01" required
+                    inputmode="decimal"
+                    class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
                 </label>
                 <label class="flex flex-col gap-1 text-[10px] text-slate-400">Interest day-count
-                  <select id="interestDayCountInput" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                  <select id="interestDayCountInput"
+                    class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
                     <option value="365">365 days</option>
                     <option value="360">360 days</option>
                   </select>
                 </label>
                 <label class="flex flex-col gap-1 text-[10px] text-slate-400">Maintenance equity (%)
-                  <input id="maintenanceMarginInput" type="number" min="0" max="99.99" step="0.01" required inputmode="decimal" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                  <input id="maintenanceMarginInput" type="number" min="0" max="99.99" step="0.01" required
+                    inputmode="decimal"
+                    class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
                 </label>
                 <label class="flex flex-col gap-1 text-[10px] text-slate-400">Stop-out equity (%)
-                  <input id="stopOutRatioInput" type="number" min="0" max="99.99" step="0.01" required inputmode="decimal" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                  <input id="stopOutRatioInput" type="number" min="0" max="99.99" step="0.01" required
+                    inputmode="decimal"
+                    class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
                 </label>
                 <label class="flex flex-col gap-1 text-[10px] text-slate-400">Rollover time (ARM)
-                  <input id="rolloverTimeInput" type="time" required class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                  <input id="rolloverTimeInput" type="time" required
+                    class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
                 </label>
                 <label class="flex flex-col gap-1 text-[10px] text-slate-400">Commission / share ($)
-                  <input id="commissionPerShareInput" type="number" min="0" step="0.001" required inputmode="decimal" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                  <input id="commissionPerShareInput" type="number" min="0" step="0.001" required inputmode="decimal"
+                    class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
                 </label>
                 <label class="flex flex-col gap-1 text-[10px] text-slate-400">Commission by value (%)
-                  <input id="commissionVolumeInput" type="number" min="0" max="100" step="0.01" required inputmode="decimal" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                  <input id="commissionVolumeInput" type="number" min="0" max="100" step="0.01" required
+                    inputmode="decimal"
+                    class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
                 </label>
                 <label class="flex flex-col gap-1 text-[10px] text-slate-400">Min comm. / order ($)
-                  <input id="minimumCommissionInput" type="number" min="0" step="0.01" required inputmode="decimal" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                  <input id="minimumCommissionInput" type="number" min="0" step="0.01" required inputmode="decimal"
+                    class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
                 </label>
               </div>
               <div class="flex flex-wrap items-center gap-2">
-                <button type="submit" class="rounded bg-cyan-800 px-3 py-1.5 text-xs font-bold text-cyan-100 hover:bg-cyan-700">Save assumptions</button>
-                <button id="resetBrokerRulesButton" type="button" class="rounded border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800">Restore defaults</button>
+                <button type="submit"
+                  class="rounded bg-cyan-800 px-3 py-1.5 text-xs font-bold text-cyan-100 hover:bg-cyan-700">Save
+                  assumptions</button>
+                <button id="resetBrokerRulesButton" type="button"
+                  class="rounded border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800">Restore
+                  defaults</button>
                 <span class="text-[10px] text-slate-500">Saved in this browser. Confirm rates with your broker.</span>
               </div>
             </form>
@@ -77,55 +97,75 @@
               <p class="text-[10px] uppercase tracking-wider text-slate-500">Provider-specific symbols</p>
               <div class="grid grid-cols-2 gap-2">
                 <label class="col-span-2 flex flex-col gap-1 text-[10px] text-slate-400">Portfolio ticker
-                  <input id="quoteMappingTickerInput" type="text" placeholder="e.g. 7203" required autocapitalize="characters" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white uppercase">
+                  <input id="quoteMappingTickerInput" type="text" placeholder="e.g. 7203" required
+                    autocapitalize="characters"
+                    class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white uppercase">
                 </label>
                 <label class="flex flex-col gap-1 text-[10px] text-slate-400">Finnhub symbol
-                  <input id="finnhubSymbolInput" type="text" placeholder="e.g. TSE:7203" autocapitalize="characters" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white uppercase">
+                  <input id="finnhubSymbolInput" type="text" placeholder="e.g. TSE:7203" autocapitalize="characters"
+                    class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white uppercase">
                 </label>
                 <label class="flex flex-col gap-1 text-[10px] text-slate-400">Stooq symbol
-                  <input id="stooqSymbolInput" type="text" placeholder="e.g. 7203.jp" autocapitalize="characters" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white lowercase">
+                  <input id="stooqSymbolInput" type="text" placeholder="e.g. 7203.jp" autocapitalize="characters"
+                    class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white lowercase">
                 </label>
               </div>
               <div class="flex flex-wrap items-center gap-2">
-                <button type="submit" class="rounded bg-cyan-800 px-3 py-1.5 text-xs font-bold text-cyan-100 hover:bg-cyan-700">Save quote symbols</button>
-                <span id="quoteMappingStatus" class="text-[10px] text-slate-500">Blank provider symbol uses its default US ticker format.</span>
+                <button type="submit"
+                  class="rounded bg-cyan-800 px-3 py-1.5 text-xs font-bold text-cyan-100 hover:bg-cyan-700">Save quote
+                  symbols</button>
+                <span id="quoteMappingStatus" class="text-[10px] text-slate-500">Blank provider symbol uses its default
+                  US ticker format.</span>
               </div>
-              <p class="text-[10px] text-slate-500">Console: <code>quote symbol 7203 finnhub=TSE:7203 stooq=7203.jp</code>. Use <code>default</code> to clear a mapping.</p>
+              <p class="text-[10px] text-slate-500">Console:
+                <code>quote symbol 7203 finnhub=TSE:7203 stooq=7203.jp</code>. Use <code>default</code> to clear a
+                mapping.
+              </p>
             </form>
           </div>
         </details>
 
-        <div class="flex flex-wrap items-end gap-2">
-          <div id="headerCredentialsFields" class="flex flex-wrap items-end gap-2">
+        <div class="flex flex-wrap items-center">
+          <div id="headerCredentialsFields" class="flex flex-wrap items-center">
             <div class="flex flex-col gap-1 min-w-[150px]">
-              <label class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Gist</label>
-              <input id="gistIdInput" type="text" placeholder="ID or URL" autocomplete="off"
-                    title="Paste your Secret Gist ID (e.g. 3f8b92c4a1b2c3d4e5f6...)"
-                    class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-purple-500 w-36 text-slate-200">
+              <label class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Gateway Secret
+                <input id="gatewaySecretInput" type="text" placeholder="Gateway Secret" autocomplete="off"
+                  class="bg-slate-800 text-slate-200 border border-slate-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-500" />
+              </label>
             </div>
           </div>
 
           <div class="flex flex-wrap items-center gap-2 mx-auto">
-            <button id="toggleHeaderCredentialsButton" onclick="toggleHeaderCredentialsVisibility()" aria-expanded="true" class="hidden bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 text-xs font-bold px-3 py-2 rounded transition" title="Hide credential inputs">
+            <button id="toggleHeaderCredentialsButton" onclick="toggleHeaderCredentialsVisibility()"
+              aria-expanded="true"
+              class="hidden bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 text-xs font-bold px-3 py-2 rounded transition"
+              title="Hide credential inputs">
               Hide keys
             </button>
-            <button id="saveApiKeysButton" onclick="saveApiKeys()" class="bg-emerald-600 hover:bg-emerald-500 text-black text-xs font-bold px-3 py-2 rounded transition" title="Save keys and pull latest cloud state">
+            <button id="saveApiKeysButton" onclick="saveApiKeys()"
+              class="bg-emerald-600 hover:bg-emerald-500 text-black text-xs font-bold px-3 py-2 rounded transition"
+              title="Save keys and pull latest cloud state">
               Save
             </button>
 
-            <button onclick="pullCloudAndRewriteLocal()" class="bg-slate-800 hover:bg-slate-700 border border-purple-600 text-purple-300 text-xs font-bold px-3 py-2 rounded transition flex items-center gap-1" title="Force pull cloud data and rewrite local storage">
+            <button onclick="pullCloudAndRewriteLocal()"
+              class="bg-slate-800 hover:bg-slate-700 border border-purple-600 text-purple-300 text-xs font-bold px-3 py-2 rounded transition flex items-center gap-1"
+              title="Force pull cloud data and rewrite local storage">
               <span>☁↓</span> Pull
             </button>
           </div>
         </div>
-       
+
         <div class="flex flex-wrap items-center justify-center gap-2">
-          <button id="refreshQuotesButton" onclick="refreshAllLivePrices()" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-cyan-300 text-xs font-bold px-3 py-2 rounded transition flex items-center gap-1">
+          <button id="refreshQuotesButton" onclick="refreshAllLivePrices()"
+            class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-cyan-300 text-xs font-bold px-3 py-2 rounded transition flex items-center gap-1">
             <span>↻</span> Quotes
           </button>
           <label class="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500">
             Auto
-            <select id="quoteRefreshInterval" class="bg-slate-900 border border-slate-700 text-xs px-2 py-2 rounded text-slate-300 focus:outline-none focus:border-cyan-500" aria-label="Automatic quote refresh interval">
+            <select id="quoteRefreshInterval"
+              class="bg-slate-900 border border-slate-700 text-xs px-2 py-2 rounded text-slate-300 focus:outline-none focus:border-cyan-500"
+              aria-label="Automatic quote refresh interval">
               <option value="0">Off</option>
               <option value="15000">15 sec</option>
               <option value="30000">30 sec</option>
@@ -133,16 +173,22 @@
             </select>
           </label>
 
-          <button onclick="exportBackupJSON()" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 text-xs font-bold px-3 py-2 rounded transition" title="Export portfolio state to JSON file">
+          <button onclick="exportBackupJSON()"
+            class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 text-xs font-bold px-3 py-2 rounded transition"
+            title="Export portfolio state to JSON file">
             Export
           </button>
-          
-          <label class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-purple-300 text-xs font-bold px-3 py-2 rounded transition cursor-pointer" title="Validate and confirm a portfolio backup import; cloud sync depends on Gist configuration">
+
+          <label
+            class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-purple-300 text-xs font-bold px-3 py-2 rounded transition cursor-pointer"
+            title="Validate and confirm a portfolio backup import; cloud sync depends on Gist configuration">
             Import
             <input type="file" id="importFileInput" class="hidden" accept=".json" onchange="importBackupJSON(event)">
           </label>
 
-          <button onclick="resetToBlankState()" class="bg-rose-950/60 hover:bg-rose-900 border border-rose-800 text-rose-300 text-xs font-bold px-3 py-2 rounded transition" title="Clear all local data and return to blank slate">
+          <button onclick="resetToBlankState()"
+            class="bg-rose-950/60 hover:bg-rose-900 border border-rose-800 text-rose-300 text-xs font-bold px-3 py-2 rounded transition"
+            title="Clear all local data and return to blank slate">
             Reset
           </button>
         </div>
@@ -151,11 +197,12 @@
 
     <!-- Active Position Header Panel -->
     <div class="border-card p-4 sm:p-6 rounded-xl space-y-4">
-      
+
       <!-- Asset View Tabs -->
       <div class="flex items-center justify-between border-b border-slate-800 pb-3 flex-wrap gap-2">
         <div class="flex items-center gap-1.5 overflow-x-auto" id="tickerTabs"></div>
-        <div class="text-sm font-semibold text-emerald-400 font-mono tracking-tight" id="daysToBreakeven">Combined Breakeven: 0 days</div>
+        <div class="text-sm font-semibold text-emerald-400 font-mono tracking-tight" id="daysToBreakeven">Combined
+          Breakeven: 0 days</div>
       </div>
 
       <!-- Main Board Content -->
@@ -164,12 +211,21 @@
           <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <div class="text-lg font-black text-slate-100 tracking-wide">NO ACTIVE MARGIN POSITIONS</div>
-              <p class="text-xs text-slate-400 mt-1">Start with a trade, add a cash stock, or restore a saved backup to continue.</p>
+              <p class="text-xs text-slate-400 mt-1">Start with a trade, add a cash stock, or restore a saved backup to
+                continue.</p>
             </div>
             <div class="flex flex-wrap gap-2">
-              <button onclick="document.getElementById('cmdInput').value='bought [shares] [TICKER] for [price]'; document.getElementById('cmdInput').focus();" class="bg-emerald-600 hover:bg-emerald-500 text-black text-[11px] font-bold px-3 py-1.5 rounded transition">Quick Buy</button>
-              <button onclick="document.getElementById('cmdInput').value='add cash stock [shares] [TICKER] for [price]'; document.getElementById('cmdInput').focus();" class="bg-cyan-700 hover:bg-cyan-600 text-white text-[11px] font-bold px-3 py-1.5 rounded transition">Add Cash Stock</button>
-              <button onclick="document.getElementById('importFileInput').click()" class="bg-slate-800 hover:bg-slate-700 text-purple-300 text-[11px] font-bold px-3 py-1.5 rounded border border-purple-700 transition">Import Backup</button>
+              <button
+                onclick="document.getElementById('cmdInput').value='bought [shares] [TICKER] for [price]'; document.getElementById('cmdInput').focus();"
+                class="bg-emerald-600 hover:bg-emerald-500 text-black text-[11px] font-bold px-3 py-1.5 rounded transition">Quick
+                Buy</button>
+              <button
+                onclick="document.getElementById('cmdInput').value='add cash stock [shares] [TICKER] for [price]'; document.getElementById('cmdInput').focus();"
+                class="bg-cyan-700 hover:bg-cyan-600 text-white text-[11px] font-bold px-3 py-1.5 rounded transition">Add
+                Cash Stock</button>
+              <button onclick="document.getElementById('importFileInput').click()"
+                class="bg-slate-800 hover:bg-slate-700 text-purple-300 text-[11px] font-bold px-3 py-1.5 rounded border border-purple-700 transition">Import
+                Backup</button>
             </div>
           </div>
         </div>
@@ -182,60 +238,99 @@
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <div id="boardExternalLinks" class="flex items-center gap-2"></div>
-            <button id="marketInsightsToggle" type="button" onclick="toggleMarketInsights()" aria-expanded="false" aria-controls="marketInsightsPanel" class="hidden rounded border border-cyan-800/70 bg-cyan-950/30 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 transition hover:bg-cyan-900/50">
+            <button id="marketInsightsToggle" type="button" onclick="toggleMarketInsights()" aria-expanded="false"
+              aria-controls="marketInsightsPanel"
+              class="hidden rounded border border-cyan-800/70 bg-cyan-950/30 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 transition hover:bg-cyan-900/50">
               Market insights
             </button>
           </div>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5 text-xs text-slate-300">
-          <div class="portfolio-metric"><span class="portfolio-metric-label">Tranches / Holdings</span><span id="boardTranches" class="portfolio-metric-value">None</span></div>
-          <div class="portfolio-metric"><span class="portfolio-metric-label">Total Invested | Avg</span><span id="boardInvested" class="portfolio-metric-value">$0.00 | $0.00</span></div>
+          <div class="portfolio-metric"><span class="portfolio-metric-label">Tranches / Holdings</span><span
+              id="boardTranches" class="portfolio-metric-value">None</span></div>
+          <div class="portfolio-metric"><span class="portfolio-metric-label">Total Invested | Avg</span><span
+              id="boardInvested" class="portfolio-metric-value">$0.00 | $0.00</span></div>
           <div class="portfolio-metric">
-            <span class="portfolio-metric-label">Share Price | Market Value</span><span id="boardPrice" class="portfolio-metric-value text-emerald-400">$0.00 | $0.00 – +$0.00 (+0.00%)</span>
+            <span class="portfolio-metric-label">Share Price | Market Value</span><span id="boardPrice"
+              class="portfolio-metric-value text-emerald-400">$0.00 | $0.00 – +$0.00 (+0.00%)</span>
             <span id="boardDailyQuote" class="block text-[10px] text-slate-500"></span>
             <span id="boardQuoteMeta" class="text-[10px] text-slate-500"></span>
           </div>
-          <div class="portfolio-metric"><span class="portfolio-metric-label">Margin Debt</span><span id="boardMargin" class="portfolio-metric-value text-rose-300">-$0.00</span></div>
-          <div class="portfolio-metric"><span class="portfolio-metric-label">Total Commissions</span><span id="boardComms" class="portfolio-metric-value">$0.00</span></div>
-          <div class="portfolio-metric"><span class="portfolio-metric-label">Margin Charged</span><span id="boardMarginCharged" class="portfolio-metric-value">$0.00</span></div>
-          
+          <div class="portfolio-metric"><span class="portfolio-metric-label">Margin Debt</span><span id="boardMargin"
+              class="portfolio-metric-value text-rose-300">-$0.00</span></div>
+          <div class="portfolio-metric"><span class="portfolio-metric-label">Total Commissions</span><span
+              id="boardComms" class="portfolio-metric-value">$0.00</span></div>
+          <div class="portfolio-metric"><span class="portfolio-metric-label">Margin Charged</span><span
+              id="boardMarginCharged" class="portfolio-metric-value">$0.00</span></div>
+
           <div class="portfolio-risk-summary text-slate-300">
-            <div><span class="text-slate-500">Account Equity:</span> <span id="boardEquity" class="text-white font-bold font-mono">$0.00</span></div>
-            <div><span id="boardCushionLabel" class="text-slate-500">Allocated Cash / Collateral:</span> <span id="boardCushionMetric" class="text-cyan-400 font-bold font-mono">$0.00</span></div>
-            <div title="Estimated from portfolio equity and configured margin thresholds; not a live broker risk indicator.">
-              <span class="text-slate-500">Margin Risk:</span> <span id="boardMarginRisk" class="text-emerald-400 font-bold font-mono">No margin debt</span>
+            <div><span class="text-slate-500">Account Equity:</span> <span id="boardEquity"
+                class="text-white font-bold font-mono">$0.00</span></div>
+            <div><span id="boardCushionLabel" class="text-slate-500">Allocated Cash / Collateral:</span> <span
+                id="boardCushionMetric" class="text-cyan-400 font-bold font-mono">$0.00</span></div>
+            <div
+              title="Estimated from portfolio equity and configured margin thresholds; not a live broker risk indicator.">
+              <span class="text-slate-500">Margin Risk:</span> <span id="boardMarginRisk"
+                class="text-emerald-400 font-bold font-mono">No margin debt</span>
             </div>
-            <div id="boardMarginCallRow" class="hidden" title="Estimate assumes the configured maintenance-margin ratio and that the full allocated cushion qualifies as collateral. Actual broker requirements may differ.">
-              <span class="text-slate-500">Margin-call trigger:</span> <span id="boardMarginCall" class="text-amber-400 font-bold font-mono"></span>
+            <div id="boardMarginCallRow" class="hidden"
+              title="Estimate assumes the configured maintenance-margin ratio and that the full allocated cushion qualifies as collateral. Actual broker requirements may differ.">
+              <span class="text-slate-500">Margin-call trigger:</span> <span id="boardMarginCall"
+                class="text-amber-400 font-bold font-mono"></span>
             </div>
-            <div id="boardStopOutRow" class="hidden" title="Estimate assumes the configured stop-out threshold and that the full allocated cushion qualifies as collateral. Actual broker requirements may differ.">
-              <span class="text-slate-500">Stop-out trigger:</span> <span id="boardStopOut" class="text-rose-400 font-bold font-mono"></span>
+            <div id="boardStopOutRow" class="hidden"
+              title="Estimate assumes the configured stop-out threshold and that the full allocated cushion qualifies as collateral. Actual broker requirements may differ.">
+              <span class="text-slate-500">Stop-out trigger:</span> <span id="boardStopOut"
+                class="text-rose-400 font-bold font-mono"></span>
             </div>
           </div>
         </div>
 
-        <section id="marketInsightsPanel" class="hidden space-y-4 rounded-lg border border-cyan-900/50 bg-gradient-to-br from-slate-900/80 to-slate-950/90 p-4 shadow-lg shadow-black/10" aria-label="Market insights">
+        <section id="marketInsightsPanel"
+          class="hidden space-y-4 rounded-lg border border-cyan-900/50 bg-gradient-to-br from-slate-900/80 to-slate-950/90 p-4 shadow-lg shadow-black/10"
+          aria-label="Market insights">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
-                <h2 class="text-sm font-black uppercase tracking-wider text-slate-100">Market insights <span id="marketInsightsTicker" class="text-cyan-300"></span></h2>
-                <span id="marketInsightsStatus" class="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[9px] font-semibold text-slate-400" role="status">Ready</span>
+                <h2 class="text-sm font-black uppercase tracking-wider text-slate-100">Market insights <span
+                    id="marketInsightsTicker" class="text-cyan-300"></span></h2>
+                <span id="marketInsightsStatus"
+                  class="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[9px] font-semibold text-slate-400"
+                  role="status">Ready</span>
               </div>
-              <p class="mt-1 text-[10px] text-slate-500">Company news, fundamentals, earnings, and analyst consensus. Finnhub and Alpha Vantage are tried as available.</p>
+              <p class="mt-1 text-[10px] text-slate-500">Company news, fundamentals, earnings, and analyst consensus.
+                Finnhub and Alpha Vantage are tried as available.</p>
             </div>
-            <button id="marketInsightsRefresh" type="button" onclick="refreshMarketInsight()" class="inline-flex shrink-0 items-center gap-1.5 rounded border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-[10px] font-bold text-slate-300 transition hover:border-cyan-800 hover:bg-slate-800 hover:text-cyan-200 disabled:cursor-wait disabled:opacity-50" aria-label="Refresh current market insight">
+            <button id="marketInsightsRefresh" type="button" onclick="refreshMarketInsight()"
+              class="inline-flex shrink-0 items-center gap-1.5 rounded border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-[10px] font-bold text-slate-300 transition hover:border-cyan-800 hover:bg-slate-800 hover:text-cyan-200 disabled:cursor-wait disabled:opacity-50"
+              aria-label="Refresh current market insight">
               <span aria-hidden="true">↻</span> Refresh
             </button>
           </div>
-          <div id="marketInsightsTabs" class="flex gap-1.5 overflow-x-auto border-b border-slate-800 pb-2" role="tablist" aria-label="Market insight categories">
-            <button type="button" id="insightTabNews" data-insight="news" onclick="loadMarketInsight('news')" class="insight-tab whitespace-nowrap rounded px-3 py-1.5 text-[10px] font-bold transition" role="tab" aria-controls="marketInsightsContent" aria-selected="false" tabindex="-1">News</button>
-            <button type="button" id="insightTabFundamentals" data-insight="fundamentals" onclick="loadMarketInsight('fundamentals')" class="insight-tab whitespace-nowrap rounded px-3 py-1.5 text-[10px] font-bold transition" role="tab" aria-controls="marketInsightsContent" aria-selected="false" tabindex="-1">Fundamentals</button>
-            <button type="button" id="insightTabEarnings" data-insight="earnings" onclick="loadMarketInsight('earnings')" class="insight-tab whitespace-nowrap rounded px-3 py-1.5 text-[10px] font-bold transition" role="tab" aria-controls="marketInsightsContent" aria-selected="false" tabindex="-1">Earnings</button>
-            <button type="button" id="insightTabAnalysts" data-insight="analysts" onclick="loadMarketInsight('analysts')" class="insight-tab whitespace-nowrap rounded px-3 py-1.5 text-[10px] font-bold transition" role="tab" aria-controls="marketInsightsContent" aria-selected="false" tabindex="-1">Analysts</button>
+          <div id="marketInsightsTabs" class="flex gap-1.5 overflow-x-auto border-b border-slate-800 pb-2"
+            role="tablist" aria-label="Market insight categories">
+            <button type="button" id="insightTabNews" data-insight="news" onclick="loadMarketInsight('news')"
+              class="insight-tab whitespace-nowrap rounded px-3 py-1.5 text-[10px] font-bold transition" role="tab"
+              aria-controls="marketInsightsContent" aria-selected="false" tabindex="-1">News</button>
+            <button type="button" id="insightTabFundamentals" data-insight="fundamentals"
+              onclick="loadMarketInsight('fundamentals')"
+              class="insight-tab whitespace-nowrap rounded px-3 py-1.5 text-[10px] font-bold transition" role="tab"
+              aria-controls="marketInsightsContent" aria-selected="false" tabindex="-1">Fundamentals</button>
+            <button type="button" id="insightTabEarnings" data-insight="earnings"
+              onclick="loadMarketInsight('earnings')"
+              class="insight-tab whitespace-nowrap rounded px-3 py-1.5 text-[10px] font-bold transition" role="tab"
+              aria-controls="marketInsightsContent" aria-selected="false" tabindex="-1">Earnings</button>
+            <button type="button" id="insightTabAnalysts" data-insight="analysts"
+              onclick="loadMarketInsight('analysts')"
+              class="insight-tab whitespace-nowrap rounded px-3 py-1.5 text-[10px] font-bold transition" role="tab"
+              aria-controls="marketInsightsContent" aria-selected="false" tabindex="-1">Analysts</button>
           </div>
-          <div id="marketInsightsContent" class="min-h-24 rounded-lg border border-slate-800/80 bg-slate-950/70 p-3 text-xs text-slate-300" role="tabpanel" aria-labelledby="insightTabNews" aria-live="polite" aria-busy="false">
-            <p class="text-slate-400">Choose a category to load insights for this holding. Results are cached briefly to reduce provider requests.</p>
+          <div id="marketInsightsContent"
+            class="min-h-24 rounded-lg border border-slate-800/80 bg-slate-950/70 p-3 text-xs text-slate-300"
+            role="tabpanel" aria-labelledby="insightTabNews" aria-live="polite" aria-busy="false">
+            <p class="text-slate-400">Choose a category to load insights for this holding. Results are cached briefly to
+              reduce provider requests.</p>
           </div>
         </section>
 
@@ -261,7 +356,8 @@
         <div class="flex justify-between items-center border-b border-slate-800 pb-2">
           <div>
             <h2 class="text-lg font-black text-cyan-400 tracking-wide">CURRENT BALANCE / MARGIN DEBT</h2>
-            <p class="text-xs text-slate-400">Enter a positive balance or negative margin debt; non-margin holdings are tracked separately.</p>
+            <p class="text-xs text-slate-400">Enter a positive balance or negative margin debt; non-margin holdings are
+              tracked separately.</p>
           </div>
           <div class="text-right">
             <span class="text-xs text-slate-500 block">Cash + Holdings</span>
@@ -279,12 +375,16 @@
             <label class="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-slate-500">
               <span>Signed amount (USD)</span>
               <span class="relative">
-                <span class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden="true">$</span>
-                <input type="number" id="freeCashInput" step="0.01" required inputmode="decimal" aria-label="Signed balance or margin debt in US dollars" title="Positive values are cash balance; negative values are margin debt"
-                       class="number-input bg-slate-950 border border-slate-700 text-xs pl-6 pr-2 py-2 rounded w-40 text-right text-emerald-300 font-mono font-bold focus:outline-none focus:border-cyan-500">
+                <span class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-500"
+                  aria-hidden="true">$</span>
+                <input type="number" id="freeCashInput" step="0.01" required inputmode="decimal"
+                  aria-label="Signed balance or margin debt in US dollars"
+                  title="Positive values are cash balance; negative values are margin debt"
+                  class="number-input bg-slate-950 border border-slate-700 text-xs pl-6 pr-2 py-2 rounded w-40 text-right text-emerald-300 font-mono font-bold focus:outline-none focus:border-cyan-500">
               </span>
             </label>
-            <button type="button" onclick="saveCurrentBalanceFromInput()" class="bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-bold px-3 py-2 rounded border border-slate-600 transition">
+            <button type="button" onclick="saveCurrentBalanceFromInput()"
+              class="bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-bold px-3 py-2 rounded border border-slate-600 transition">
               Update
             </button>
           </div>
@@ -321,23 +421,28 @@
           <div class="bg-slate-900/40 p-2.5 rounded border border-slate-800/80 flex flex-wrap items-end gap-2 pt-2">
             <label class="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-slate-500">
               Ticker
-              <input type="text" id="newCashTicker" placeholder="e.g. AAPL" required aria-label="Stock ticker symbol" autocomplete="off" autocapitalize="characters"
-                     class="bg-slate-950 border border-slate-700 text-xs px-2.5 py-2 rounded text-white w-28 uppercase focus:outline-none focus:border-cyan-500">
+              <input type="text" id="newCashTicker" placeholder="e.g. AAPL" required aria-label="Stock ticker symbol"
+                autocomplete="off" autocapitalize="characters"
+                class="bg-slate-950 border border-slate-700 text-xs px-2.5 py-2 rounded text-white w-28 uppercase focus:outline-none focus:border-cyan-500">
             </label>
             <label class="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-slate-500">
               Shares
-              <input type="number" id="newCashShares" placeholder="0" min="0.001" step="0.001" required inputmode="decimal" aria-label="Number of shares"
-                     class="number-input bg-slate-950 border border-slate-700 text-xs px-2.5 py-2 rounded text-white w-28 text-right font-mono tabular-nums focus:outline-none focus:border-cyan-500">
+              <input type="number" id="newCashShares" placeholder="0" min="0.001" step="0.001" required
+                inputmode="decimal" aria-label="Number of shares"
+                class="number-input bg-slate-950 border border-slate-700 text-xs px-2.5 py-2 rounded text-white w-28 text-right font-mono tabular-nums focus:outline-none focus:border-cyan-500">
             </label>
             <label class="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-slate-500">
               Price (optional)
               <span class="relative">
-                <span class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden="true">$</span>
-                <input type="number" id="newCashPrice" placeholder="Auto-fetch" min="0.01" step="0.01" inputmode="decimal" aria-label="Optional price per share in US dollars"
-                       class="number-input bg-slate-950 border border-slate-700 text-xs pl-6 pr-2.5 py-2 rounded text-white w-36 text-right font-mono tabular-nums focus:outline-none focus:border-cyan-500">
+                <span class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-500"
+                  aria-hidden="true">$</span>
+                <input type="number" id="newCashPrice" placeholder="Auto-fetch" min="0.01" step="0.01"
+                  inputmode="decimal" aria-label="Optional price per share in US dollars"
+                  class="number-input bg-slate-950 border border-slate-700 text-xs pl-6 pr-2.5 py-2 rounded text-white w-36 text-right font-mono tabular-nums focus:outline-none focus:border-cyan-500">
               </span>
             </label>
-            <button type="button" onclick="addCashStockFromUI()" class="bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold px-3 py-2 rounded transition">
+            <button type="button" onclick="addCashStockFromUI()"
+              class="bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold px-3 py-2 rounded transition">
               + Add Holding
             </button>
           </div>
@@ -351,12 +456,14 @@
       <div class="flex flex-wrap justify-between items-end gap-2 border-b border-slate-800 pb-3">
         <div>
           <h2 class="text-lg font-black text-purple-300 tracking-wide">CLOSED TRADE HISTORY</h2>
-          <p class="text-xs text-slate-400">Realized margin trades, including partial sales. Net profit includes commissions and allocated margin fees.</p>
+          <p class="text-xs text-slate-400">Realized margin trades, including partial sales. Net profit includes
+            commissions and allocated margin fees.</p>
         </div>
         <span id="closedTradesCount" class="text-xs text-slate-400 font-mono"></span>
       </div>
 
-      <div id="closedTradesEmptyState" class="hidden rounded border border-dashed border-slate-700 bg-slate-900/40 p-4 text-center text-xs text-slate-500">
+      <div id="closedTradesEmptyState"
+        class="hidden rounded border border-dashed border-slate-700 bg-slate-900/40 p-4 text-center text-xs text-slate-500">
         No closed margin trades yet.
       </div>
 
@@ -384,21 +491,25 @@
         <span>Trading Console (Deterministic Engine + Gemini AI)</span>
         <span id="aiStatus" class="text-slate-500 text-[10px]">READY</span>
       </div>
-      
-      <div id="terminalLog" class="h-64 overflow-y-auto bg-slate-950 p-3 rounded text-xs space-y-2 border border-slate-800/80">
+
+      <div id="terminalLog"
+        class="h-64 overflow-y-auto bg-slate-950 p-3 rounded text-xs space-y-2 border border-slate-800/80">
         <div class="text-slate-500">[System]: Portfolio ready. Check the Gist status indicator for cloud sync.</div>
       </div>
 
       <div class="flex gap-2">
-        <input id="cmdInput" type="text" placeholder="e.g. sell today for [current price] vs sell 14 days later for [target price]"
-               class="flex-1 bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-emerald-500 text-white"
-               onkeydown="if(event.key === 'Enter') executeCommand()">
-        <button onclick="executeCommand()" class="bg-emerald-600 hover:bg-emerald-500 text-black text-xs font-bold px-4 py-2 rounded transition">
+        <input id="cmdInput" type="text"
+          placeholder="e.g. sell today for [current price] vs sell 14 days later for [target price]"
+          class="flex-1 bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded focus:outline-none focus:border-emerald-500 text-white"
+          onkeydown="if(event.key === 'Enter') executeCommand()">
+        <button onclick="executeCommand()"
+          class="bg-emerald-600 hover:bg-emerald-500 text-black text-xs font-bold px-4 py-2 rounded transition">
           Send
         </button>
       </div>
 
-      <div id="consoleQuickActions" class="flex flex-wrap items-center gap-2" aria-label="Quick actions for the selected stock"></div>
+      <div id="consoleQuickActions" class="flex flex-wrap items-center gap-2"
+        aria-label="Quick actions for the selected stock"></div>
 
       <!-- Quick Commands Reference -->
       <div class="pt-3 mt-3 border-t border-slate-800">
@@ -406,11 +517,13 @@
         <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2 text-xs text-slate-400">
           <div><span class="text-emerald-400 font-bold">Buy Shares:</span> <span id="hintBuyShares"></span></div>
           <div><span class="text-cyan-400 font-bold">Non-Margin Holding:</span> <span id="hintCashHolding"></span></div>
-          <div><span class="text-cyan-400 font-bold">Balance / Margin Debt:</span> balance 5000 <span class="text-slate-600 italic">or</span> balance -5000</div>
+          <div><span class="text-cyan-400 font-bold">Balance / Margin Debt:</span> balance 5000 <span
+              class="text-slate-600 italic">or</span> balance -5000</div>
           <div><span class="text-purple-400 font-bold">Ladder Exit:</span> <span id="hintLadderExit"></span></div>
           <div><span class="text-cyan-400 font-bold">Exit Comparison:</span> <span id="hintExitComparison"></span></div>
           <div><span class="text-amber-400 font-bold">Live Market Quote:</span> <span id="hintLiveQuote"></span></div>
-          <div><span class="text-cyan-400 font-bold">Quote Symbol:</span> quote symbol [TICKER] finnhub=[provider symbol] stooq=[provider symbol]</div>
+          <div><span class="text-cyan-400 font-bold">Quote Symbol:</span> quote symbol [TICKER] finnhub=[provider
+            symbol] stooq=[provider symbol]</div>
           <div><span class="text-emerald-400 font-bold">Sync Margin Debt:</span> b: -5000</div>
           <div><span class="text-rose-400 font-bold">Close Position:</span> <span id="hintClosePosition"></span></div>
         </div>
@@ -419,4 +532,5 @@
 
   </div>
 </body>
+
 </html>

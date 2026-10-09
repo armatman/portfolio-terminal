@@ -92,7 +92,9 @@ async function fetchYahooStockData(ticker) {
   const cleanTicker = ticker.trim().toUpperCase();
 
   try {
-    const res = await fetch(`${YAHOO_PROXY_URL}?symbol=${encodeURIComponent(cleanTicker)}`);
+    const res = await fetch(`${YAHOO_PROXY_URL}?symbol=${encodeURIComponent(cleanTicker)}`, {
+      headers: { "X-App-Auth": localStorage.getItem("gateway_secret") || "" }
+    });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || `HTTP ${res.status}`);
@@ -361,17 +363,19 @@ async function pullStateFromGistOnLoad() {
 }
 
 async function pullCloudAndRewriteLocal() {
-  const gistId = extractCleanGistId(document.getElementById('gistIdInput').value.trim());
+  const secretInput = extractCleanGistId(document.getElementById('gatewaySecretInput').value.trim());
 
-  if (!gistId) {
-    showToast('Configure Gist ID before pulling cloud state.', 'error');
+  if (!secretInput) {
+    showToast('Enter Secret Input before pulling cloud state.', 'error');
     return false;
   }
 
   showToast('Pulling portfolio from cloud...', 'info');
 
   try {
-    const res = await fetch(`${YAHOO_PROXY_URL}?action=gist&gistId=${encodeURIComponent(gistId)}`);
+    const res = await fetch(`${YAHOO_PROXY_URL}?action=gist`, {
+      headers: { "X-App-Auth": localStorage.getItem("gateway_secret") || "" }
+    });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.message || err.error || `HTTP ${res.status}`);
@@ -431,10 +435,10 @@ async function pullCloudAndRewriteLocal() {
 
 function loadSavedState() {
   // 1. ADD THIS BLOCK to auto-fill the Gist ID:
-  const savedGistId = localStorage.getItem('github_gist_id');
-  const gistInput = document.getElementById('gistIdInput');
-  if (savedGistId && gistInput) {
-    gistInput.value = savedGistId;
+  const savedGateway = localStorage.getItem('gateway_secret');
+  const gatewayInput = document.getElementById('gatewaySecretInput');
+  if (savedGateway && gatewayInput) {
+    gatewayInput.value = savedGateway;
   }
 
   // 2. Existing portfolio state loading logic:
@@ -505,19 +509,17 @@ function resetToBlankState() {
 }
 
 async function saveApiKeys() {
-  const rawGist = document.getElementById("gistIdInput")?.value.trim() || "";
-  const cleanGistId = extractCleanGistId(rawGist);
+  const secret = document.getElementById("gatewaySecretInput")?.value.trim() || "";
 
-  if (!cleanGistId) {
-    showToast("Please enter a valid Gist ID.", "error");
+  if (!secret) {
+    showToast("Please enter the Gateway Secret.", "error");
     return;
   }
 
-  localStorage.setItem("github_gist_id", cleanGistId);
-  logTerminal("[System]: Gist ID saved.");
-  showToast("Gist ID saved.", "success");
+  localStorage.setItem("gateway_secret", secret);
+  logTerminal("[System]: Gateway Secret saved.");
+  showToast("Gateway unlocked.", "success");
 
-  // Pull cloud data and instantly refresh quotes if successful
   const success = await pullCloudAndRewriteLocal();
   if (success) {
     await refreshAllLivePrices();
@@ -1131,7 +1133,12 @@ async function renderYahooInsights(ticker) {
   container.innerHTML = '<div class="py-3 text-center text-xs text-slate-500 font-mono animate-pulse">Loading market insights...</div>';
 
   try {
-    const res = await fetch(`${YAHOO_PROXY_URL}?symbol=${encodeURIComponent(ticker)}`);
+    const res = await fetch(`${YAHOO_PROXY_URL}?symbol=${encodeURIComponent(ticker)}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'X-App-Auth': localStorage.getItem("gateway_secret") || ""
+      },
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
@@ -1424,7 +1431,13 @@ async function fetchBoardAnalystTarget(ticker) {
   const cleanTicker = ticker.trim().toUpperCase();
 
   try {
-    const res = await fetch(`${YAHOO_PROXY_URL}?symbol=${encodeURIComponent(cleanTicker)}`);
+    const res = await fetch(`${YAHOO_PROXY_URL}?symbol=${encodeURIComponent(cleanTicker)}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-App-Auth': localStorage.getItem("gateway_secret") || ""
+      }
+    });
     if (res.ok) {
       const data = await res.json();
       const t = data.analystTargets;
@@ -2081,7 +2094,13 @@ async function loadMarketInsight(section, force = false) {
   try {
     // --- TAB 1: NEWS (Routed through Worker) ---
     if (section === 'news') {
-      const res = await fetch(`${YAHOO_PROXY_URL}?action=news&symbol=${encodeURIComponent(ticker)}`);
+      const res = await fetch(`${YAHOO_PROXY_URL}?action=news&symbol=${encodeURIComponent(ticker)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-App-Auth': localStorage.getItem("gateway_secret") || ""
+        }
+      });
       if (!res.ok) throw new Error("Worker news proxy request failed.");
       const news = await res.json();
 
@@ -2100,7 +2119,13 @@ async function loadMarketInsight(section, force = false) {
     }
 
     // --- TABS 2, 3, 4: YAHOO DATA VIA WORKER ---
-    const res = await fetch(`${YAHOO_PROXY_URL}?symbol=${encodeURIComponent(ticker)}`);
+    const res = await fetch(`${YAHOO_PROXY_URL}?symbol=${encodeURIComponent(ticker)}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-App-Auth': localStorage.getItem("gateway_secret") || ""
+      }
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
@@ -3418,7 +3443,7 @@ async function executeCommand() {
     // Route prompt through Worker proxy
     const res = await fetch(`${YAHOO_PROXY_URL}?action=gemini`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", 'X-App-Auth': localStorage.getItem("gateway_secret") || "" },
       body: JSON.stringify({ prompt })
     });
 
@@ -3465,11 +3490,14 @@ async function executeCommand() {
 async function initApp() {
   await loadSavedState();
 
-  // Pull latest cloud data on startup if the user has a saved Gist ID
-  const savedGistId = localStorage.getItem('github_gist_id');
-  if (savedGistId) {
+  const savedGateway = localStorage.getItem('gateway_secret');
+  if (savedGateway) {
     await pullCloudAndRewriteLocal();
   }
+
+  ['gatewaySecretInput'].forEach(id => {
+    document.getElementById(id)?.addEventListener('input', updateHeaderCredentialsVisibility);
+  });
 
   const credentialsConfigured = areHeaderCredentialsConfigured();
   headerCredentialsHidden = credentialsConfigured || localStorage.getItem('header_credentials_hidden') === 'true';

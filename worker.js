@@ -31,26 +31,33 @@ async function getYahooCredentials() {
 
 export default {
     async fetch(request, env) {
-        // 1. Handle CORS Preflight
+
         if (request.method === "OPTIONS") {
             return new Response(null, {
                 headers: {
-                    "Access-Control-Allow-Origin": "*",
                     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-                    "Access-Control-Allow-Headers": "Content-Type, Authorization"
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-App-Auth"
                 }
+            });
+        }
+
+        const corsHeaders = {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS"
+        };
+
+        // SECURITY CHECK: Validate Gateway Secret
+        const clientSecret = request.headers.get("X-App-Auth");
+        if (clientSecret !== env.GATEWAY_SECRET) {
+            return new Response(JSON.stringify({ error: "Unauthorized gateway access." }), {
+                status: 401,
+                headers: corsHeaders
             });
         }
 
         const url = new URL(request.url);
         const action = url.searchParams.get("action");
         const symbol = (url.searchParams.get("symbol") || url.searchParams.get("ticker") || "").toUpperCase();
-
-        const corsHeaders = {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS"
-        };
 
         try {
             // --- ACTION 1: Finnhub Company News ---
@@ -159,22 +166,15 @@ export default {
                 }
             }
 
-            // --- ACTION 4: GitHub Gist Storage Proxy ---
-            // --- ACTION 4: GitHub Gist Storage Proxy ---
+            // --- ACTION 4: GitHub Gist Storage Proxy (Backend Only) ---
             if (action === "gist") {
                 const githubToken = env.GITHUB_KEY || env.GITHUB_TOKEN || env.GITHUB_PAT;
-                if (!githubToken) {
-                    return new Response(JSON.stringify({
-                        error: "GITHUB_KEY is missing from Worker environment variables. Set GITHUB_KEY in Cloudflare settings."
-                    }), { status: 500, headers: corsHeaders });
-                }
+                const gistId = env.GIST_ID; // Pulled from Cloudflare, not the URL
 
-                const gistId = url.searchParams.get("gistId");
-                if (!gistId) {
-                    return new Response(JSON.stringify({ error: "Missing required 'gistId' parameter." }), {
-                        status: 400,
-                        headers: corsHeaders
-                    });
+                if (!githubToken || !gistId) {
+                    return new Response(JSON.stringify({
+                        error: "Backend is missing GITHUB_KEY or GIST_ID secrets."
+                    }), { status: 500, headers: corsHeaders });
                 }
 
                 const ghHeaders = {
@@ -184,43 +184,24 @@ export default {
                     "User-Agent": USER_AGENT
                 };
 
-                // Pull Gist State
                 if (request.method === "GET") {
-                    const ghRes = await fetch(`https://api.github.com/gists/${encodeURIComponent(gistId)}`, {
-                        headers: ghHeaders
-                    });
+                    const ghRes = await fetch(`https://api.github.com/gists/${gistId}`, { headers: ghHeaders });
                     const data = await ghRes.json();
-                    return new Response(JSON.stringify(data), {
-                        status: ghRes.status,
-                        headers: corsHeaders
-                    });
+                    return new Response(JSON.stringify(data), { status: ghRes.status, headers: corsHeaders });
                 }
 
-                // Push / Save Gist State
-                // Push / Save Gist State
                 if (request.method === "POST") {
-                    // You must await request.text() here to extract the actual string payload from the request stream
-                    const bodyText = await request.text();
-
-                    const ghRes = await fetch(`https://api.github.com/gists/${encodeURIComponent(gistId)}`, {
+                    const bodyPayload = await request.text();
+                    const ghRes = await fetch(`https://api.github.com/gists/${gistId}`, {
                         method: "PATCH",
-                        headers: {
-                            ...ghHeaders,
-                            "Content-Type": "application/json"
-                        },
-                        body: bodyText
+                        headers: { ...ghHeaders, "Content-Type": "application/json" },
+                        body: bodyPayload
                     });
                     const data = await ghRes.json();
-                    return new Response(JSON.stringify(data), {
-                        status: ghRes.status,
-                        headers: corsHeaders
-                    });
+                    return new Response(JSON.stringify(data), { status: ghRes.status, headers: corsHeaders });
                 }
 
-                return new Response(JSON.stringify({ error: "Method not allowed for gist action." }), {
-                    status: 405,
-                    headers: corsHeaders
-                });
+                return new Response(JSON.stringify({ error: "Method not allowed." }), { status: 405, headers: corsHeaders });
             }
 
             // --- DEFAULT ACTION: Yahoo Deep Stock Data & Live Quotes ---
