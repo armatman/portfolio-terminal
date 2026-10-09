@@ -3623,36 +3623,64 @@ async function executeCommand() {
   }
 }
 
-window.onload = async () => {
+async function initApp() {
   await loadSavedState();
+
   const credentialsConfigured = areHeaderCredentialsConfigured();
   headerCredentialsHidden = credentialsConfigured || localStorage.getItem('header_credentials_hidden') === 'true';
+
   ['apiKeyInput', 'finnhubKeyInput', 'alphaVantageKeyInput', 'twelveDataKeyInput', 'rapidApiKeyInput', 'gistIdInput', 'githubTokenInput'].forEach(id => {
-    document.getElementById(id).addEventListener('input', updateHeaderCredentialsVisibility);
+    document.getElementById(id)?.addEventListener('input', updateHeaderCredentialsVisibility);
   });
+
   const quoteRefreshInterval = document.getElementById('quoteRefreshInterval');
   const savedQuoteRefreshInterval = localStorage.getItem(QUOTE_REFRESH_INTERVAL_KEY);
   const parsedQuoteRefreshInterval = savedQuoteRefreshInterval === null ? NaN : Number(savedQuoteRefreshInterval);
   const initialQuoteRefreshInterval = QUOTE_REFRESH_INTERVALS.has(parsedQuoteRefreshInterval)
     ? parsedQuoteRefreshInterval
     : DEFAULT_QUOTE_REFRESH_INTERVAL_MS;
-  quoteRefreshInterval.value = String(initialQuoteRefreshInterval);
-  quoteRefreshInterval.addEventListener('change', () => setQuoteRefreshInterval(quoteRefreshInterval.value));
+
+  if (quoteRefreshInterval) {
+    quoteRefreshInterval.value = String(initialQuoteRefreshInterval);
+    quoteRefreshInterval.addEventListener('change', () => setQuoteRefreshInterval(quoteRefreshInterval.value));
+  }
   setQuoteRefreshInterval(initialQuoteRefreshInterval);
+
   setBrokerRuleInputs();
-  document.getElementById('brokerRulesForm').addEventListener('submit', saveBrokerRuleInputs);
-  document.getElementById('resetBrokerRulesButton').addEventListener('click', resetBrokerRules);
-  document.getElementById('quoteSymbolForm').addEventListener('submit', saveQuoteSymbolMapping);
-  document.getElementById('quoteMappingTickerInput').addEventListener('change', event => {
+  document.getElementById('brokerRulesForm')?.addEventListener('submit', saveBrokerRuleInputs);
+  document.getElementById('resetBrokerRulesButton')?.addEventListener('click', resetBrokerRules);
+  document.getElementById('quoteSymbolForm')?.addEventListener('submit', saveQuoteSymbolMapping);
+  document.getElementById('quoteMappingTickerInput')?.addEventListener('change', event => {
     populateQuoteSymbolMapping(event.target.value);
   });
-  document.getElementById('marketInsightsTabs').addEventListener('keydown', handleMarketInsightsTabKeydown);
+  document.getElementById('marketInsightsTabs')?.addEventListener('keydown', handleMarketInsightsTabKeydown);
+
   updateHeaderCredentialsVisibility();
   if (credentialsConfigured) {
-    document.getElementById('mainDeskContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.getElementById('mainDeskContainer')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
+
+  // Initial render from local/gist state, then pull live quotes
+  renderBoard();
   await refreshAllLivePrices();
-};
+
+  // Background refresh triggers
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      refreshAllLivePrices();
+    }
+  });
+
+  window.addEventListener('online', () => {
+    refreshAllLivePrices();
+  });
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}
 
 Object.assign(window, {
   addCashStockFromUI,
