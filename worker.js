@@ -1,267 +1,145 @@
-import { env } from "cloudflare:workers";
-
-const GKEY = env[`GEMINI_KEY`];
-const FKEY = env[`FINNHUB_KEY`];
-const AKEY = env[`ALPHA_KEY`];
-const TKEY = env[`TWELVE_KEY`];
-const RKEY = env[`RAPID_KEY`];
-const GISTKEY = env[`GIST_KEY`];
-const GITRKEY = env[`GIT_KEY`];
-
-// Global session cache across Cloudflare Worker invocations
-let cachedCookie = null;
-let cachedCrumb = null;
-
-async function getYahooCrumb(headers) {
-
-    if (cachedCookie && cachedCrumb) {
-        return { cookie: cachedCookie, crumb: cachedCrumb };
-    }
-
-    try {
-        // Step 1: Hit fc.yahoo.com to extract session cookie
-        const fcRes = await fetch("https://fc.yahoo.com", {
-            headers: { ...headers },
-            redirect: "manual"
-        });
-
-        const setCookie = fcRes.headers.get("set-cookie");
-        if (setCookie) {
-            cachedCookie = setCookie.split(";")[0];
-        }
-
-        // Step 2: Request the dynamic authorization crumb
-        const crumbRes = await fetch("https://query1.finance.yahoo.com/v1/test/getcrumb", {
-            headers: {
-                ...headers,
-                "Cookie": cachedCookie || ""
-            }
-        });
-
-        if (crumbRes.ok) {
-            cachedCrumb = (await crumbRes.text()).trim();
-        }
-
-        return { cookie: cachedCookie, crumb: cachedCrumb };
-    } catch (e) {
-        return { cookie: null, crumb: null };
-    }
-}
-
 export default {
-    async fetch(request) {
-        const corsHeaders = {
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type",
-            "Access-Control-Max-Age": "86400",
-        };
-
+    async fetch(request, env) {
+        // 1. Handle CORS Preflight
         if (request.method === "OPTIONS") {
-            return new Response(null, { status: 204, headers: corsHeaders });
+            return new Response(null, {
+                headers: {
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization"
+                }
+            });
         }
 
         const url = new URL(request.url);
-        let symbol = (url.searchParams.get("symbol") || url.searchParams.get("ticker") || "").trim().toUpperCase();
+        const action = url.searchParams.get("action");
+        const symbol = (url.searchParams.get("symbol") || url.searchParams.get("ticker") || "").toUpperCase();
 
-        if (!symbol && request.method === "POST") {
-            try {
-                const body = await request.json();
-                symbol = (body.symbol || body.ticker || "").trim().toUpperCase();
-            } catch (e) { }
-        }
-
-        if (!symbol) {
-            return new Response(
-                JSON.stringify({ error: "Missing required 'symbol' or 'ticker' parameter." }),
-                {
-                    status: 400,
-                    headers: {
-                        ...corsHeaders,
-                        "Content-Type": "application/json",
-                    },
-                }
-            );
-        }
-
-        const baseHeaders = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "*/*",
-            "Accept-Language": "en-US,en;q=0.9",
+        const corsHeaders = {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS"
         };
 
         try {
-            // 1. Fetch real-time chart data (works without crumb)
-            const chartUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1d`;
-            const chartPromise = fetch(chartUrl, { headers: baseHeaders });
+            // --- ACTION 1: Finnhub Company News ---
+            if (action === "news") {
+                if (!symbol) throw new Error("Missing symbol for news.");
+                const toDate = new Date().toISOString().split("T")[0];
+                const fromDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+                const finnhubKey = env.FINNHUB_KEY || env.FINNHUB_API_KEY;
 
-            // 2. Fetch authenticated cookie and crumb for QuoteSummary
-            const { cookie, crumb } = await getYahooCrumb(baseHeaders);
-
-            const modules = [
-                "price",
-                "summaryDetail",
-                "financialData",
-                "defaultKeyStatistics",
-                "recommendationTrend",
-                "upgradeDowngradeHistory",
-                "earningsHistory",
-                "calendarEvents",
-                "assetProfile"
-            ].join(",");
-
-            let summaryUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}`;
-            if (crumb) {
-                summaryUrl += `&crumb=${encodeURIComponent(crumb)}`;
+                const res = await fetch(
+                    `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(symbol)}&from=${fromDate}&to=${toDate}&token=${finnhubKey}`
+                );
+                const data = await res.json();
+                return new Response(JSON.stringify(data), { headers: corsHeaders });
             }
 
-            const summaryHeaders = {
-                ...baseHeaders,
-                ...(cookie ? { "Cookie": cookie } : {})
-            };
+            // --- ACTION 2: Gemini AI Chat / Intent Routing ---
+            if (action === "gemini") {
+                const geminiKey = env.GEMINI_KEY || env.GEMINI_API_KEY;
+                const body = await request.json();
+                const model = body.model || "gemini-1.5-flash";
+                const prompt = body.prompt;
 
-            const [chartRes, summaryRes] = await Promise.all([
-                chartPromise,
-                fetch(summaryUrl, { headers: summaryHeaders })
-            ]);
-
-            let chartData = null;
-            if (chartRes.ok) {
-                const chartJson = await chartRes.json();
-                chartData = chartJson.chart?.result?.[0]?.meta || null;
+                const res = await fetch(
+                    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: prompt }] }]
+                        })
+                    }
+                );
+                const data = await res.json();
+                return new Response(JSON.stringify(data), { headers: corsHeaders });
             }
 
-            let summaryData = {};
-            if (summaryRes.ok) {
-                const sumJson = await summaryRes.json();
-                summaryData = sumJson.quoteSummary?.result?.[0] || {};
-            } else {
-                // If cached crumb expired, invalidate cache so the next call refreshes it
-                cachedCookie = null;
-                cachedCrumb = null;
-            }
-
-            const p = summaryData.price || {};
-            const sd = summaryData.summaryDetail || {};
-            const fd = summaryData.financialData || {};
-            const ks = summaryData.defaultKeyStatistics || {};
-            const ap = summaryData.assetProfile || {};
-
-            const responsePayload = {
-                symbol: symbol,
-                companyName: p.longName || p.shortName || chartData?.shortName || symbol,
-                currency: p.currency || chartData?.currency || "USD",
-                exchange: p.exchangeName || chartData?.exchangeName || null,
-
-                // --- 1. Real-Time Price & Market Data ---
-                price: {
-                    current: p.regularMarketPrice?.raw ?? chartData?.regularMarketPrice ?? null,
-                    previousClose: p.regularMarketPreviousClose?.raw ?? chartData?.chartPreviousClose ?? null,
-                    open: p.regularMarketOpen?.raw ?? null,
-                    dayHigh: p.regularMarketDayHigh?.raw ?? chartData?.regularMarketDayHigh ?? null,
-                    dayLow: p.regularMarketDayLow?.raw ?? chartData?.regularMarketDayLow ?? null,
-                    dayChange: p.regularMarketChange?.raw ?? (chartData ? (chartData.regularMarketPrice - chartData.chartPreviousClose) : null),
-                    dayChangePercent: p.regularMarketChangePercent?.raw ?? (chartData ? ((chartData.regularMarketPrice - chartData.chartPreviousClose) / chartData.chartPreviousClose) * 100 : null),
-                    volume: p.regularMarketVolume?.raw ?? chartData?.regularMarketVolume ?? null,
-                    avgVolume: sd.averageVolume?.raw ?? null,
-                    fiftyTwoWeekHigh: sd.fiftyTwoWeekHigh?.raw ?? null,
-                    fiftyTwoWeekLow: sd.fiftyTwoWeekLow?.raw ?? null,
-                    marketCap: p.marketCap?.raw ?? null,
-                },
-
-                // --- 2. Analyst Price Targets ---
-                analystTargets: {
-                    mean: fd.targetMeanPrice?.raw ?? null,
-                    high: fd.targetHighPrice?.raw ?? null,
-                    low: fd.targetLowPrice?.raw ?? null,
-                    median: fd.targetMedianPrice?.raw ?? null,
-                    numberOfAnalysts: fd.numberOfAnalystOpinions?.raw ?? 0,
-                    consensusRecommendation: fd.recommendationKey ?? null,
-                    recommendationScore: fd.recommendationMean?.raw ?? null,
-                },
-
-                // --- 3. Recommendation Trend History ---
-                recommendationTrends: summaryData.recommendationTrend?.trend || [],
-
-                // --- 4. Upgrades & Downgrades History ---
-                upgradesDowngrades: (summaryData.upgradeDowngradeHistory?.history || []).slice(0, 10).map(u => ({
-                    date: u.epochGradeDate ? new Date(u.epochGradeDate * 1000).toISOString().split('T')[0] : null,
-                    firm: u.firm,
-                    toGrade: u.toGrade,
-                    fromGrade: u.fromGrade,
-                    action: u.action,
-                })),
-
-                // --- 5. Valuation Multiples & Key Statistics ---
-                valuation: {
-                    peTrailing: sd.trailingPE?.raw ?? null,
-                    peForward: sd.forwardPE?.raw ?? null,
-                    pegRatio: ks.pegRatio?.raw ?? null,
-                    priceToBook: ks.priceToBook?.raw ?? null,
-                    enterpriseValue: ks.enterpriseValue?.raw ?? null,
-                    evToEbitda: ks.enterpriseToEbitda?.raw ?? null,
-                    beta: sd.beta?.raw ?? null,
-                    shortPercentOfFloat: ks.shortPercentOfFloat?.raw ? (ks.shortPercentOfFloat.raw * 100).toFixed(2) + "%" : null,
-                    sharesOutstanding: ks.sharesOutstanding?.raw ?? null,
-                },
-
-                // --- 6. Financial Health & Margins ---
-                financialHealth: {
-                    profitMargin: fd.profitMargins?.raw ? (fd.profitMargins.raw * 100).toFixed(2) + "%" : null,
-                    operatingMargin: fd.operatingMargins?.raw ? (fd.operatingMargins.raw * 100).toFixed(2) + "%" : null,
-                    returnOnEquity: fd.returnOnEquity?.raw ? (fd.returnOnEquity.raw * 100).toFixed(2) + "%" : null,
-                    totalRevenue: fd.totalRevenue?.raw ?? null,
-                    totalDebt: fd.totalDebt?.raw ?? null,
-                    totalCash: fd.totalCash?.raw ?? null,
-                    debtToEquity: fd.debtToEquity?.raw ?? null,
-                },
-
-                // --- 7. Earnings History ---
-                earningsHistory: (summaryData.earningsHistory?.history || []).map(eh => ({
-                    quarter: eh.quarter?.fmt,
-                    epsActual: eh.epsActual?.raw,
-                    epsEstimate: eh.epsEstimate?.raw,
-                    epsDifference: eh.epsDifference?.raw,
-                    surprisePercent: eh.surprisePercent?.raw ? (eh.surprisePercent.raw * 100).toFixed(2) + "%" : null,
-                })),
-
-                // --- 8. Calendar Events ---
-                calendar: {
-                    earningsDate: summaryData.calendarEvents?.earnings?.earningsDate?.[0]?.fmt ?? null,
-                    exDividendDate: summaryData.calendarEvents?.exDividendDate?.fmt ?? null,
-                    dividendRate: sd.dividendRate?.raw ?? 0,
-                    dividendYield: sd.dividendYield?.raw ? (sd.dividendYield.raw * 100).toFixed(2) + "%" : "0%",
-                },
-
-                // --- 9. Company Profile ---
-                profile: {
-                    sector: ap.sector || null,
-                    industry: ap.industry || null,
-                    website: ap.website || null,
-                    description: ap.longBusinessSummary || null,
-                },
-
-                timestamp: new Date().toISOString()
-            };
-
-            return new Response(JSON.stringify(responsePayload, null, 2), {
-                status: 200,
-                headers: {
-                    ...corsHeaders,
-                    "Content-Type": "application/json",
-                },
-            });
-        } catch (err) {
-            return new Response(
-                JSON.stringify({ error: err.message, symbol }),
-                {
-                    status: 500,
-                    headers: {
-                        ...corsHeaders,
-                        "Content-Type": "application/json",
-                    },
+            // --- ACTION 3: Fallback Provider Quote (Finnhub / TwelveData) ---
+            if (action === "provider-quote") {
+                const provider = url.searchParams.get("provider");
+                if (provider === "finnhub") {
+                    const finnhubKey = env.FINNHUB_KEY || env.FINNHUB_API_KEY;
+                    const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${finnhubKey}`);
+                    const data = await res.json();
+                    return new Response(JSON.stringify(data), { headers: corsHeaders });
                 }
-            );
+                if (provider === "twelvedata") {
+                    const tdKey = env.TWELVE_KEY || env.TWELVEDATA_KEY;
+                    const res = await fetch(`https://api.twelvedata.com/quote?symbol=${encodeURIComponent(symbol)}&apikey=${tdKey}`);
+                    const data = await res.json();
+                    return new Response(JSON.stringify(data), { headers: corsHeaders });
+                }
+            }
+
+            // --- DEFAULT ACTION: Yahoo Deep Stock Data & Live Quotes ---
+            if (!symbol) {
+                return new Response(JSON.stringify({ error: "Missing required 'symbol' or 'action' parameter." }), {
+                    status: 400,
+                    headers: corsHeaders
+                });
+            }
+
+            // Existing Yahoo Finance scraping/proxy logic:
+            const yahooUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=price,summaryDetail,defaultKeyStatistics,financialData,recommendationTrend,upgradeDowngradeHistory,calendarEvents`;
+            const response = await fetch(yahooUrl, {
+                headers: { "User-Agent": "Mozilla/5.0" }
+            });
+
+            if (!response.ok) {
+                throw new Error(`Yahoo returned HTTP ${response.status}`);
+            }
+
+            const raw = await response.json();
+            const result = raw.quoteSummary?.result?.[0] || {};
+
+            // Normalized response object for the app
+            const payload = {
+                symbol,
+                price: {
+                    current: result.price?.regularMarketPrice?.raw ?? null,
+                    previousClose: result.price?.regularMarketPreviousClose?.raw ?? null,
+                    change: result.price?.regularMarketChange?.raw ?? null,
+                    changePercent: result.price?.regularMarketChangePercent?.raw ?? null
+                },
+                valuation: {
+                    peTrailing: result.summaryDetail?.trailingPE?.raw ?? null,
+                    peForward: result.summaryDetail?.forwardPE?.raw ?? null,
+                    pegRatio: result.defaultKeyStatistics?.pegRatio?.raw ?? null,
+                    shortPercentOfFloat: result.defaultKeyStatistics?.shortPercentOfFloat?.fmt ?? null,
+                    priceToBook: result.defaultKeyStatistics?.priceToBook?.raw ?? null
+                },
+                financialHealth: {
+                    profitMargin: result.financialData?.profitMargins?.fmt ?? null,
+                    returnOnEquity: result.financialData?.returnOnEquity?.fmt ?? null,
+                    totalDebt: result.financialData?.totalDebt?.raw ?? null
+                },
+                analystTargets: {
+                    mean: result.financialData?.targetMeanPrice?.raw ?? null,
+                    high: result.financialData?.targetHighPrice?.raw ?? null,
+                    low: result.financialData?.targetLowPrice?.raw ?? null,
+                    median: result.financialData?.targetMedianPrice?.raw ?? null,
+                    consensusRecommendation: result.financialData?.recommendationKey ?? null
+                },
+                calendar: {
+                    earningsDate: result.calendarEvents?.earnings?.earningsDate?.[0]?.fmt ?? null
+                },
+                upgradesDowngrades: (result.upgradeDowngradeHistory?.history || []).slice(0, 5).map(item => ({
+                    firm: item.firm,
+                    toGrade: item.toGrade,
+                    fromGrade: item.fromGrade,
+                    action: item.action
+                }))
+            };
+
+            return new Response(JSON.stringify(payload), { headers: corsHeaders });
+        } catch (err) {
+            return new Response(JSON.stringify({ error: err.message }), {
+                status: 500,
+                headers: corsHeaders
+            });
         }
-    },
+    }
 };
