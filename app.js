@@ -3,24 +3,24 @@ import { getUsEquityProjectionDates } from './src/domain/tradingCalendar.ts';
 import { generateIntentText, GeminiApiError, listGeminiModels, shouldTryAnotherGeminiModel } from './src/features/ai/geminiClient.ts';
 import { parseAiIntent } from './src/features/ai/intent.ts';
 import { buildIntentPrompt } from './src/features/ai/prompt.ts';
-import { parseFinnhubQuoteDetails } from './src/features/quotes/finnhubQuote.ts';
-import { fetchFinnhubInsight } from './src/features/quotes/finnhubInsights.ts';
-import {
+// import { parseFinnhubQuoteDetails } from './src/features/quotes/finnhubQuote.ts';
+// import { fetchFinnhubInsight } from './src/features/quotes/finnhubInsights.ts';
+/* import {
   fetchAlphaVantageAnalysts,
   fetchAlphaVantageEarnings,
   fetchAlphaVantageNews,
   fetchAlphaVantageOverview,
   fetchAlphaVantageQuote
-} from './src/features/quotes/alphaVantageAnalysts.ts';
-import { fetchTwelveDataQuote } from './src/features/quotes/twelveData.ts';
+} from './src/features/quotes/alphaVantageAnalysts.ts'; */
+// import { fetchTwelveDataQuote } from './src/features/quotes/twelveData.ts';
 import {
   decryptProviderKeys,
   encryptProviderKeys
 } from './src/features/credentials/encryptedProviderKeys.ts';
-import {
+/* import {
   fetchRapidApiYahooAnalystTarget,
   fetchRapidApiYahooQuote
-} from './src/features/quotes/rapidApiYahoo.ts';
+} from './src/features/quotes/rapidApiYahoo.ts'; */
 import {
   classifyActualVsEstimate,
   classifyRecommendationCounts,
@@ -393,11 +393,12 @@ async function loadSavedState() {
 
   localStorage.removeItem('fmp_api_key');
 
-  const savedGistId = localStorage.getItem('github_gist_id');
+  /* const savedGistId = localStorage.getItem('github_gist_id');
   if (savedGistId) document.getElementById('gistIdInput').value = savedGistId;
 
   const savedToken = localStorage.getItem('github_pat_token');
   if (savedToken) document.getElementById('githubTokenInput').value = savedToken;
+  */
 
   const pulled = await pullStateFromGistOnLoad();
   if (!pulled) {
@@ -422,7 +423,7 @@ async function loadSavedState() {
 let headerCredentialsHidden = false;
 
 function areHeaderCredentialsConfigured() {
-  return ['apiKeyInput', 'finnhubKeyInput', 'gistIdInput', 'githubTokenInput']
+  return ['gistIdInput', 'githubTokenInput']
     .every(id => document.getElementById(id).value.trim().length > 0);
 }
 
@@ -470,29 +471,6 @@ function resetToBlankState() {
 }
 
 async function saveApiKeys() {
-  const geminiKey = document.getElementById('apiKeyInput').value.trim();
-  if (geminiKey) sessionStorage.setItem('gemini_api_key', geminiKey);
-  else sessionStorage.removeItem('gemini_api_key');
-  localStorage.removeItem('gemini_api_key');
-
-  const fKey = document.getElementById('finnhubKeyInput').value.trim();
-  localStorage.setItem('finnhub_api_key', fKey);
-  for (let index = sessionStorage.length - 1; index >= 0; index -= 1) {
-    const key = sessionStorage.key(index);
-    if (key?.startsWith(FINNHUB_ANALYST_RESTRICTED_PREFIX)) sessionStorage.removeItem(key);
-  }
-
-  const alphaVantageKey = document.getElementById('alphaVantageKeyInput').value.trim();
-  if (alphaVantageKey) localStorage.setItem('alpha_vantage_api_key', alphaVantageKey);
-  else localStorage.removeItem('alpha_vantage_api_key');
-  const twelveDataKey = document.getElementById('twelveDataKeyInput').value.trim();
-  if (twelveDataKey) localStorage.setItem('twelve_data_api_key', twelveDataKey);
-  else localStorage.removeItem('twelve_data_api_key');
-  const rapidApiKey = document.getElementById('rapidApiKeyInput').value.trim();
-  if (rapidApiKey) localStorage.setItem('rapidapi_yahoo_key', rapidApiKey);
-  else localStorage.removeItem('rapidapi_yahoo_key');
-  renderBoardAnalystConsensus(getMarketInsightsTicker(), true);
-
   const rawGist = document.getElementById('gistIdInput').value.trim();
   const cleanGistId = extractCleanGistId(rawGist);
   localStorage.setItem('github_gist_id', cleanGistId);
@@ -500,30 +478,12 @@ async function saveApiKeys() {
   const token = document.getElementById('githubTokenInput').value.trim();
   localStorage.setItem('github_pat_token', token);
 
-  let encryptedKeysSynced = false;
-  if (cleanGistId && token) {
-    try {
-      encryptedKeysSynced = await saveProviderKeysToGist(getProviderKeysFromStorage(), geminiKey);
-      if (encryptedKeysSynced) logTerminal('[Gist Keys]: Provider keys encrypted and saved to the Gist.');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logTerminal(`[Gist Keys Error]: ${message}`);
-      showToast(`Provider keys saved locally, but cloud encryption failed: ${message}`, 'error');
-    }
-  }
+  logTerminal("[System]: Gist credentials saved.");
+  showToast('Gist credentials updated.', 'success');
 
-  logTerminal("[System]: Credentials saved.");
-  const syncConfigured = Boolean(cleanGistId && token);
-  const toastMessage = syncConfigured
-    ? encryptedKeysSynced
-      ? 'Credentials saved securely. Checking cloud state...'
-      : 'Credentials saved locally. Add a Gemini key to encrypt provider keys in the Gist.'
-    : 'Provider keys saved in this browser. Gist sync is not configured.';
-  showToast(toastMessage, syncConfigured && encryptedKeysSynced ? 'success' : 'warning');
   if (cleanGistId) {
     await pullCloudAndRewriteLocal();
   }
-  if (marketInsightsOpen) await loadMarketInsight(activeInsightSection, true);
 }
 
 function calcCommission(shares, totalVal) {
@@ -2067,7 +2027,6 @@ async function loadMarketInsight(section, force = false) {
     return;
   }
 
-  // 1. Update active tab states visually
   insightTicker = ticker;
   activeInsightSection = section;
   if (tickerBadge) tickerBadge.textContent = `· ${ticker}`;
@@ -2082,32 +2041,27 @@ async function loadMarketInsight(section, force = false) {
   content.innerHTML = '<div class="py-4 text-center text-xs text-slate-500 font-mono animate-pulse">Loading live data...</div>';
 
   try {
-    // --- TAB 1: NEWS (Finnhub) ---
+    // --- TAB 1: NEWS (Routed through Worker) ---
     if (section === 'news') {
-      const finnhubKey = localStorage.getItem('finnhub_api_key');
-      if (!finnhubKey) throw new Error("Finnhub API key required for news.");
-
-      const toDate = new Date().toISOString().split('T')[0];
-      const fromDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-      const res = await fetch(`https://finnhub.io/api/v1/company-news?symbol=${ticker}&from=${fromDate}&to=${toDate}&token=${finnhubKey}`);
-      if (!res.ok) throw new Error("Finnhub news request failed.");
+      const res = await fetch(`${YAHOO_PROXY_URL}?action=news&symbol=${encodeURIComponent(ticker)}`);
+      if (!res.ok) throw new Error("Worker news proxy request failed.");
       const news = await res.json();
 
-      if (!news || news.length === 0) {
+      if (!Array.isArray(news) || news.length === 0) {
         content.innerHTML = '<div class="py-3 text-slate-500 text-xs">No recent news found.</div>';
         return;
       }
 
       content.innerHTML = '<div class="space-y-2 mt-2">' + news.slice(0, 5).map(n => `
-        <a href="${n.url}" target="_blank" class="block bg-slate-900/60 p-2.5 rounded border border-slate-800 hover:border-cyan-800 transition">
-          <div class="text-[10px] text-cyan-400 mb-1">${new Date(n.datetime * 1000).toLocaleDateString()} · ${n.source}</div>
+        <a href="${n.url}" target="_blank" rel="noopener noreferrer" class="block bg-slate-900/60 p-2.5 rounded border border-slate-800 hover:border-cyan-800 transition">
+          <div class="text-[10px] text-cyan-400 mb-1">${new Date(n.datetime * 1000).toLocaleDateString()} · ${n.source || 'News'}</div>
           <div class="text-slate-200 text-xs font-semibold leading-snug">${n.headline}</div>
         </a>
       `).join('') + '</div>';
       return;
     }
 
-    // --- TABS 2, 3, 4: YAHOO PROXY WORKER ---
+    // --- TABS 2, 3, 4: YAHOO DATA VIA WORKER ---
     const res = await fetch(`${YAHOO_PROXY_URL}?symbol=${encodeURIComponent(ticker)}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -2154,8 +2108,7 @@ async function loadMarketInsight(section, force = false) {
           </div>
         </div>
       `;
-    }
-    else if (section === 'analysts') {
+    } else if (section === 'analysts') {
       const t = data.analystTargets || {};
       const upDown = data.upgradesDowngrades || [];
 
@@ -2163,7 +2116,7 @@ async function loadMarketInsight(section, force = false) {
         ? upDown.slice(0, 4).map(u => `
             <div class="flex justify-between items-center border-b border-slate-800/60 py-1.5 last:border-0">
               <span class="text-slate-300">${u.firm}</span>
-              <span class="text-[10px] font-bold ${u.action === 'up' ? 'text-emerald-400' : u.action === 'down' ? 'text-rose-400' : 'text-cyan-400'}">${u.action.toUpperCase()}: ${u.fromGrade || ''} ➝ ${u.toGrade || ''}</span>
+              <span class="text-[10px] font-bold ${u.action === 'up' ? 'text-emerald-400' : u.action === 'down' ? 'text-rose-400' : 'text-cyan-400'}">${(u.action || '').toUpperCase()}: ${u.fromGrade || ''} ➝ ${u.toGrade || ''}</span>
             </div>`).join('')
         : '<div class="text-slate-500">No recent actions</div>';
 
@@ -2181,8 +2134,7 @@ async function loadMarketInsight(section, force = false) {
           </div>
         </div>
       `;
-    }
-    else if (section === 'earnings') {
+    } else if (section === 'earnings') {
       const cal = data.calendar || {};
       const eh = data.earningsHistory || [];
 
@@ -2207,7 +2159,6 @@ async function loadMarketInsight(section, force = false) {
         </div>
       `;
     }
-
   } catch (err) {
     content.innerHTML = `<div class="py-3 text-rose-400 text-xs">Failed to load insights: ${err.message}</div>`;
   }
@@ -2694,17 +2645,7 @@ async function fetchLivePriceFromProviders(symbol) {
   let price = null;
   let sourceName = "";
   let quoteDetails = null;
-  const providerErrors = [];
-  const configuredSymbols = state.quoteSymbols?.[symbol] || {};
-  const finnhubSymbol = configuredSymbols.finnhub || symbol;
-  const stooqSymbol = configuredSymbols.stooq || `${symbol.toLowerCase()}.us`;
 
-  const finnhubKey = localStorage.getItem('finnhub_api_key');
-  const alphaVantageKey = localStorage.getItem('alpha_vantage_api_key') || '';
-  const twelveDataKey = localStorage.getItem('twelve_data_api_key') || '';
-  const rapidApiKey = localStorage.getItem('rapidapi_yahoo_key') || '';
-
-  // 1. ABSOLUTE PRIORITY: Your Cloudflare Yahoo Proxy
   try {
     const data = await fetchYahooStockData(symbol);
 
@@ -2722,122 +2663,7 @@ async function fetchLivePriceFromProviders(symbol) {
       };
     }
   } catch (e) {
-    console.warn(`[Yahoo Proxy Quote Error]:`, e.message);
-  }
-
-  let rapidApiQuote = null;
-  if (!price && rapidApiKey) {
-    try {
-      rapidApiQuote = await fetchRapidApiYahooQuote(rapidApiKey, symbol);
-      if (rapidApiQuote.preMarketPrice) {
-        price = rapidApiQuote.preMarketPrice;
-        sourceName = `Yahoo Finance Premarket via RapidAPI · ${symbol}`;
-        quoteDetails = parseFinnhubQuoteDetails({
-          d: rapidApiQuote.preMarketChange,
-          dp: rapidApiQuote.preMarketChangePercent,
-          h: rapidApiQuote.high,
-          l: rapidApiQuote.low
-        });
-      }
-    } catch (error) {
-      providerErrors.push(`Yahoo Finance via RapidAPI: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  if (!price && finnhubKey) {
-    try {
-      const res = await fetchQuoteProvider(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(finnhubSymbol)}&token=${encodeURIComponent(finnhubKey)}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.c && Number(data.c) > 0) {
-          price = Number(data.c);
-          sourceName = `Finnhub Live · ${finnhubSymbol}`;
-          quoteDetails = parseFinnhubQuoteDetails(data);
-        } else {
-          providerErrors.push("Finnhub returned no valid quote");
-        }
-      } else {
-        providerErrors.push(`Finnhub returned HTTP ${res.status}`);
-      }
-    } catch (error) {
-      providerErrors.push(`Finnhub: ${error.message}`);
-    }
-  }
-
-  if (!price && twelveDataKey) {
-    try {
-      const quote = await fetchTwelveDataQuote(twelveDataKey, symbol);
-      price = quote.price;
-      sourceName = `Twelve Data · ${symbol}`;
-      quoteDetails = parseFinnhubQuoteDetails({
-        d: quote.change,
-        dp: quote.changePercent,
-        h: quote.high,
-        l: quote.low
-      });
-    } catch (error) {
-      providerErrors.push(`Twelve Data: ${error.message}`);
-    }
-  }
-
-  if (!price && alphaVantageKey) {
-    try {
-      const quote = await fetchAlphaVantageQuote(alphaVantageKey, symbol);
-      price = quote.price;
-      sourceName = `Alpha Vantage · ${symbol}`;
-      quoteDetails = parseFinnhubQuoteDetails({
-        d: quote.change,
-        dp: quote.changePercent,
-        h: quote.high,
-        l: quote.low
-      });
-    } catch (error) {
-      providerErrors.push(`Alpha Vantage: ${error.message}`);
-    }
-  }
-
-  if (!price && rapidApiQuote) {
-    price = rapidApiQuote.price;
-    sourceName = `Yahoo Finance via RapidAPI · ${symbol}`;
-    quoteDetails = parseFinnhubQuoteDetails({
-      d: rapidApiQuote.change,
-      dp: rapidApiQuote.changePercent,
-      h: rapidApiQuote.high,
-      l: rapidApiQuote.low
-    });
-  }
-
-  if (!price) {
-    try {
-      const stooqUrl = `https://stooq.com/q/l/?s=${encodeURIComponent(stooqSymbol.toLowerCase())}&f=sd2t2ohlcv&h&e=csv`;
-      const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(stooqUrl)}`;
-
-      const res = await fetchQuoteProvider(proxyUrl);
-      if (res.ok) {
-        const json = await res.json();
-        if (json && json.contents) {
-          const lines = json.contents.trim().split('\n');
-          if (lines.length >= 2) {
-            const cols = lines[1].split(',');
-            const val = parseFloat(cols[6]);
-            if (!isNaN(val) && val > 0) {
-              price = val;
-              sourceName = `Stooq Feed · ${stooqSymbol}`;
-            } else {
-              providerErrors.push("Stooq returned no valid quote");
-            }
-          } else {
-            providerErrors.push("Stooq returned an empty quote");
-          }
-        } else {
-          providerErrors.push("Stooq proxy returned no quote data");
-        }
-      } else {
-        providerErrors.push(`Stooq proxy returned HTTP ${res.status}`);
-      }
-    } catch (error) {
-      providerErrors.push(`Stooq: ${error.message}`);
-    }
+    console.warn(`[Proxy Quote Error for ${symbol}]:`, e.message);
   }
 
   const updatedAt = price ? Date.now() : null;
@@ -2847,7 +2673,7 @@ async function fetchLivePriceFromProviders(symbol) {
     sourceName,
     updatedAt,
     quoteDetails,
-    error: price ? null : (providerErrors.length ? providerErrors.join("; ") : "No quote provider is configured")
+    error: price ? null : "Quote unavailable via Cloudflare proxy"
   };
 }
 
@@ -3498,12 +3324,12 @@ function confirmAiPortfolioAction(action) {
 }
 
 async function executeCommand() {
-  const input = document.getElementById('cmdInput');
+  const input = document.getElementById("cmdInput");
   const text = input.value.trim();
   if (!text) return;
 
   logTerminal(text, true);
-  input.value = '';
+  input.value = "";
 
   if (/^(?:pull|sync cloud|cloud pull|pull cloud|load cloud)$/i.test(text)) {
     await pullCloudAndRewriteLocal();
@@ -3512,23 +3338,23 @@ async function executeCommand() {
 
   const quoteSymbolCommand = text.match(/^quote\s+symbol(?:\s+(.*))?$/i);
   if (quoteSymbolCommand) {
-    const [tickerInput, ...assignments] = (quoteSymbolCommand[1] || '').trim().split(/\s+/);
+    const [tickerInput, ...assignments] = (quoteSymbolCommand[1] || "").trim().split(/\s+/);
     if (!tickerInput || !/^[A-Za-z0-9._:-]+$/.test(tickerInput) || assignments.length === 0) {
-      logTerminal('[Command Error]: Use quote symbol TICKER finnhub=SYMBOL stooq=SYMBOL (use default to clear a provider mapping).');
+      logTerminal("[Command Error]: Use quote symbol TICKER finnhub=SYMBOL stooq=SYMBOL (use default to clear a provider mapping).");
       return;
     }
     const mapping = { ...getQuoteSymbolMapping(tickerInput) };
     for (const assignment of assignments) {
       const match = assignment.match(/^(finnhub|stooq)=(.+)$/i);
       if (!match) {
-        logTerminal('[Command Error]: Use quote symbol TICKER finnhub=SYMBOL stooq=SYMBOL (use default to clear a provider mapping).');
+        logTerminal("[Command Error]: Use quote symbol TICKER finnhub=SYMBOL stooq=SYMBOL (use default to clear a provider mapping).");
         return;
       }
-      mapping[match[1].toLowerCase()] = match[2].toLowerCase() === 'default' ? '' : match[2];
+      mapping[match[1].toLowerCase()] = match[2].toLowerCase() === "default" ? "" : match[2];
     }
     const ticker = tickerInput.toUpperCase();
     const updatedMapping = setQuoteSymbolMapping(ticker, mapping);
-    logTerminal(`[Quote Mapping]: ${ticker} — Finnhub: ${updatedMapping.finnhub || 'default'} | Stooq: ${updatedMapping.stooq || 'default'}. Refresh ${ticker} or click Quotes to apply.`);
+    logTerminal(`[Quote Mapping]: ${ticker} — Finnhub: ${updatedMapping.finnhub || "default"} | Stooq: ${updatedMapping.stooq || "default"}. Refresh ${ticker} or click Quotes to apply.`);
     return;
   }
 
@@ -3538,93 +3364,68 @@ async function executeCommand() {
     return;
   }
 
-  const apiKey = sessionStorage.getItem('gemini_api_key');
-  if (!apiKey) {
-    logTerminal("[Error]: Missing Gemini API key. Enter your Google AI Studio key above.");
-    showToast('Missing Gemini API key.', 'error');
-    return;
-  }
-
-  document.getElementById('aiStatus').innerText = "CONNECTING...";
-  document.getElementById('aiStatus').className = "text-amber-400 text-[10px]";
+  document.getElementById("aiStatus").innerText = "CONNECTING...";
+  document.getElementById("aiStatus").className = "text-amber-400 text-[10px]";
 
   try {
     const prompt = buildIntentPrompt({
       text,
       activeTickers: Object.keys(state.positions),
       activeView: state.activeView,
-      today: new Date().toISOString().split('T')[0]
+      today: new Date().toISOString().split("T")[0]
     });
-    let activeModels = await listGeminiModels(apiKey);
-    document.getElementById('aiStatus').innerText = "PARSING...";
-    let lastError = null;
-    let success = false;
-    const attemptedModels = new Set();
-    let refreshedModelCatalog = false;
 
-    while (true) {
-      const model = activeModels.find(candidate => !attemptedModels.has(candidate));
-      if (!model) break;
-      attemptedModels.add(model);
-      try {
-        const rawText = await generateIntentText(apiKey, model, prompt);
-        const parsed = parseAiIntent(rawText);
+    document.getElementById("aiStatus").innerText = "PARSING...";
 
-        if (parsed.intent === "ladder") {
-          runLadderSimulation(parsed);
-          logTerminal(`[Ladder Exit Evaluated via ${model}]`);
-        } else if (parsed.intent === "comparison") {
-          runComparison(parsed);
-          logTerminal(`[Comparison Evaluated via ${model}]`);
-        } else if (parsed.intent === "simulation") {
-          runSimulation(parsed.simPrice, parsed.daysOffset, parsed.label, parsed.ticker);
-          logTerminal(`[Simulation Evaluated via ${model}]`);
-        } else if (parsed.intent === "fetch_quote") {
-          const tickerToFetch = parsed.ticker ? parsed.ticker.toUpperCase() : (state.activeView !== "COMBINED" && state.activeView !== "CASH_CUSHION" && state.activeView !== "CLOSED_HISTORY" ? state.activeView : Object.keys(state.positions)[0]);
-          if (tickerToFetch) fetchLivePrice(tickerToFetch);
-          else logTerminal("[Notice]: No active ticker specified to fetch quote for.");
-        } else if (parsed.intent === "action") {
-          if (confirmAiPortfolioAction(parsed)) await applyPortfolioActions(parsed);
-          else logTerminal('[AI Action]: Cancelled. No portfolio changes were made.');
-        } else if (parsed.intent === "chat") {
-          logTerminal(`[AI Advisor]: ${parsed.response}`);
-        }
+    // Route prompt through Worker proxy
+    const res = await fetch(`${YAHOO_PROXY_URL}?action=gemini`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt })
+    });
 
-        document.getElementById('aiStatus').innerText = "READY";
-        document.getElementById('aiStatus').className = "text-slate-500 text-[10px]";
-        success = true;
-        break;
-      } catch (err) {
-        lastError = err;
-        if (shouldTryAnotherGeminiModel(err)) {
-          if (err instanceof GeminiApiError && err.status === 404 && !refreshedModelCatalog) {
-            refreshedModelCatalog = true;
-            try {
-              activeModels = await listGeminiModels(apiKey, fetch, Date.now(), true);
-            } catch (discoveryError) {
-              lastError = new Error(
-                `${err.message} Refreshing the Gemini model list also failed: ${discoveryError instanceof Error ? discoveryError.message : String(discoveryError)}`
-              );
-            }
-          }
-          continue;
-        }
-        throw err;
-      }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Worker returned HTTP ${res.status}`);
     }
 
-    if (!success) {
-      throw lastError || new Error('No available Gemini model could process the request.');
+    const data = await res.json();
+    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!rawText) throw new Error("No response content generated by Gemini.");
+
+    const parsed = parseAiIntent(rawText);
+
+    if (parsed.intent === "ladder") {
+      runLadderSimulation(parsed);
+      logTerminal("[Ladder Exit Evaluated via Gemini Proxy]");
+    } else if (parsed.intent === "comparison") {
+      runComparison(parsed);
+      logTerminal("[Comparison Evaluated via Gemini Proxy]");
+    } else if (parsed.intent === "simulation") {
+      runSimulation(parsed.simPrice, parsed.daysOffset, parsed.label, parsed.ticker);
+      logTerminal("[Simulation Evaluated via Gemini Proxy]");
+    } else if (parsed.intent === "fetch_quote") {
+      const tickerToFetch = parsed.ticker ? parsed.ticker.toUpperCase() : (state.activeView !== "COMBINED" && state.activeView !== "CASH_CUSHION" && state.activeView !== "CLOSED_HISTORY" ? state.activeView : Object.keys(state.positions)[0]);
+      if (tickerToFetch) fetchLivePrice(tickerToFetch);
+      else logTerminal("[Notice]: No active ticker specified to fetch quote for.");
+    } else if (parsed.intent === "action") {
+      if (confirmAiPortfolioAction(parsed)) await applyPortfolioActions(parsed);
+      else logTerminal("[AI Action]: Cancelled. No portfolio changes were made.");
+    } else if (parsed.intent === "chat") {
+      logTerminal(`[AI Advisor]: ${parsed.response}`);
     }
+
+    document.getElementById("aiStatus").innerText = "READY";
+    document.getElementById("aiStatus").className = "text-slate-500 text-[10px]";
   } catch (err) {
     logTerminal(`[Error]: ${err.message}`);
-    document.getElementById('aiStatus').innerText = "ERROR";
-    document.getElementById('aiStatus').className = "text-rose-400 text-[10px]";
+    document.getElementById("aiStatus").innerText = "ERROR";
+    document.getElementById("aiStatus").className = "text-rose-400 text-[10px]";
   }
 }
 
 async function initApp() {
-  await loadSavedState();
+  // await loadSavedState();
 
   const credentialsConfigured = areHeaderCredentialsConfigured();
   headerCredentialsHidden = credentialsConfigured || localStorage.getItem('header_credentials_hidden') === 'true';
