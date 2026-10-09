@@ -58,7 +58,13 @@ describe('portfolio domain', () => {
   });
 
   it('parses short buy dates and falls back for invalid dates', () => {
-    expect(new Date(resolveTradeDateTimestamp('05 Oct 2026')).toISOString().slice(0, 10)).toBe('2026-10-05');
+    const ts = resolveTradeDateTimestamp('05 Oct 2026');
+    const d = new Date(ts);
+
+    // Extract local timezone year, month, and day to prevent UTC drift
+    const localStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    expect(localStr).toBe('2026-10-05');
     expect(resolveTradeDateTimestamp('not a date', 1234)).toBe(1234);
   });
 
