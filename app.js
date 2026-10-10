@@ -468,6 +468,7 @@ function updateHeaderCredentialsVisibility() {
 
   fields.classList.toggle('hidden', headerCredentialsHidden);
   saveButton.classList.toggle('hidden', headerCredentialsHidden);
+  toggleButton.classList.toggle('hidden', !headerCredentialsHidden);
 
   toggleButton.textContent = headerCredentialsHidden ? 'Show keys' : 'Hide keys';
   toggleButton.title = headerCredentialsHidden ? 'Show credential inputs' : 'Hide credential inputs';
@@ -515,6 +516,7 @@ async function saveApiKeys() {
   const success = await pullCloudAndRewriteLocal();
   if (success) {
     await refreshAllLivePrices();
+    toggleHeaderCredentialsVisibility();
   }
 }
 
@@ -3491,12 +3493,7 @@ async function initApp() {
     document.getElementById(id)?.addEventListener('input', updateHeaderCredentialsVisibility);
   });
 
-  headerCredentialsHidden = localStorage.getItem('header_credentials_hidden') === 'true';
-
-  // Stripped out all the removed client-side API key inputs, leaving only the Gist ID
-  ['gistIdInput'].forEach(id => {
-    document.getElementById(id)?.addEventListener('input', updateHeaderCredentialsVisibility);
-  });
+  headerCredentialsHidden = localStorage.getItem('gateway_secret')?.length > 0 || localStorage.getItem('header_credentials_hidden') === 'true';
 
   const quoteRefreshInterval = document.getElementById('quoteRefreshInterval');
   const savedQuoteRefreshInterval = localStorage.getItem(QUOTE_REFRESH_INTERVAL_KEY);

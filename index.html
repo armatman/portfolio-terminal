@@ -125,17 +125,16 @@
           </div>
         </details>
 
-        <div class="flex flex-wrap items-center">
-          <div id="headerCredentialsFields" class="flex flex-wrap items-center">
-            <div class="flex flex-col gap-1 min-w-[150px]">
-              <label class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Gateway Secret
-                <input id="gatewaySecretInput" type="text" placeholder="Gateway Secret" autocomplete="off"
-                  class="bg-slate-800 text-slate-200 border border-slate-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-500" />
-              </label>
+        <div class="flex items-center justify-center gap-4 w-full">
+          <div id="headerCredentialsFields" class="flex items-center">
+            <div class="flex flex-col gap-1 w-[225px]">
+              <label class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Gateway Secret</label>
+              <input id="gatewaySecretInput" type="text" placeholder="Gateway Secret" autocomplete="off"
+                class="w-full bg-slate-800 text-slate-200 border border-slate-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-500" />
             </div>
           </div>
 
-          <div class="flex flex-wrap items-center gap-2 mx-auto">
+          <div class="flex items-center gap-2 mt-5">
             <button id="toggleHeaderCredentialsButton" onclick="toggleHeaderCredentialsVisibility()"
               aria-expanded="true"
               class="hidden bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 text-xs font-bold px-3 py-2 rounded transition"
