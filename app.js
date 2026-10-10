@@ -3,24 +3,12 @@ import { getUsEquityProjectionDates } from './src/domain/tradingCalendar.ts';
 import { generateIntentText, GeminiApiError, listGeminiModels, shouldTryAnotherGeminiModel } from './src/features/ai/geminiClient.ts';
 import { parseAiIntent } from './src/features/ai/intent.ts';
 import { buildIntentPrompt } from './src/features/ai/prompt.ts';
-// import { parseFinnhubQuoteDetails } from './src/features/quotes/finnhubQuote.ts';
-// import { fetchFinnhubInsight } from './src/features/quotes/finnhubInsights.ts';
-/* import {
-  fetchAlphaVantageAnalysts,
-  fetchAlphaVantageEarnings,
-  fetchAlphaVantageNews,
-  fetchAlphaVantageOverview,
-  fetchAlphaVantageQuote
-} from './src/features/quotes/alphaVantageAnalysts.ts'; */
-// import { fetchTwelveDataQuote } from './src/features/quotes/twelveData.ts';
+
 import {
   decryptProviderKeys,
   encryptProviderKeys
 } from './src/features/credentials/encryptedProviderKeys.ts';
-/* import {
-  fetchRapidApiYahooAnalystTarget,
-  fetchRapidApiYahooQuote
-} from './src/features/quotes/rapidApiYahoo.ts'; */
+
 import {
   classifyActualVsEstimate,
   classifyRecommendationCounts,
@@ -52,6 +40,31 @@ const TRADERNET_RULES = { ...DEFAULT_TRADERNET_RULES };
 const TRADERNET_RULES_STORAGE_KEY = 'tradernet_rules_v1';
 const GIST_FILE_NAME = "margin_state.json";
 const GIST_CREDENTIALS_FILE_NAME = "provider_keys.enc.json";
+
+async function proxyFetch(action, queryParams = {}, fetchOptions = {}) {
+  const url = new URL(YAHOO_PROXY_URL);
+  url.searchParams.append('action', action);
+  Object.entries(queryParams).forEach(([k, v]) => {
+    if (v) url.searchParams.append(k, v);
+  });
+
+  const res = await fetch(url.toString(), {
+    ...fetchOptions,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-App-Auth': localStorage.getItem('gateway_secret') || '',
+      ...(fetchOptions.headers || {})
+    }
+  });
+
+  const isJson = res.headers.get('content-type')?.includes('application/json');
+  const data = isJson ? await res.json() : await res.text();
+
+  if (!res.ok) {
+    throw new Error(data.error || data.message || `HTTP ${res.status}`);
+  }
+  return data;
+}
 
 function formatUSD(val) {
   const num = Number(val) || 0;
@@ -362,74 +375,81 @@ async function pullStateFromGistOnLoad() {
   return false;
 }
 
-async function pullCloudAndRewriteLocal() {
-  const secretInput = extractCleanGistId(document.getElementById('gatewaySecretInput').value.trim());
+async function syncCloudState(mode = 'push') {
+  const secret = localStorage.getItem('gateway_secret');
 
-  if (!secretInput) {
-    showToast('Enter Secret Input before pulling cloud state.', 'error');
+  if (!secret) {
+    if (mode === 'pull') showToast('Gateway Secret required to access cloud state.', 'error');
     return false;
   }
 
-  showToast('Pulling portfolio from cloud...', 'info');
+  if (mode === 'push') {
+    try {
+      await proxyFetch('gist', {}, {
+        method: 'POST',
+        body: JSON.stringify({
+          description: 'Portfolio State Update',
+          files: { 'portfolio-state.json': { content: JSON.stringify(state, null, 2) } }
+        })
+      });
 
-  try {
-    const res = await fetch(`${YAHOO_PROXY_URL}?action=gist`, {
-      headers: { "X-App-Auth": localStorage.getItem("gateway_secret") || "" }
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.message || err.error || `HTTP ${res.status}`);
-    }
-
-    const data = await res.json();
-
-    // Look for margin_state.json first, as it contains your populated data
-    const marginFile = data.files?.['margin_state.json'];
-    const portfolioFile = data.files?.['portfolio-state.json'];
-
-    // Default to whichever file exists and has content
-    const fileToProcess = marginFile || portfolioFile || Object.values(data.files || {})[0];
-
-    if (!fileToProcess || !fileToProcess.content) {
-      throw new Error('Gist state payload was empty or missing content.');
-    }
-
-    if (fileToProcess.content === "[object Promise]") {
-      throw new Error('Gist data is corrupted. Please manually fix the Gist in GitHub.');
-    }
-
-    let parsedState = JSON.parse(fileToProcess.content);
-
-    // Handle the nested "payload" structure found in your margin_state.json
-    if (parsedState.payload && typeof parsedState.payload === 'string') {
-      try {
-        const decodedPayload = atob(parsedState.payload);
-        parsedState = JSON.parse(decodedPayload);
-      } catch (e) {
-        console.warn("Failed to decode base64 payload in margin_state.json", e);
+      const syncEl = document.getElementById('cloudSyncStatus');
+      if (syncEl) {
+        syncEl.textContent = `Synced: ${new Date().toLocaleTimeString()}`;
+        syncEl.className = 'text-[10px] text-emerald-400 font-mono';
       }
+      return true;
+    } catch (err) {
+      console.error('Failed to sync to cloud:', err);
+      const syncEl = document.getElementById('cloudSyncStatus');
+      if (syncEl) {
+        syncEl.textContent = 'Sync failed';
+        syncEl.className = 'text-[10px] text-rose-400 font-mono';
+      }
+      return false;
     }
+  }
 
-    if (!parsedState || typeof parsedState !== 'object') {
-      throw new Error('Invalid JSON structure inside gist state file');
+  if (mode === 'pull') {
+    showToast('Pulling portfolio from cloud...', 'info');
+
+    try {
+      const data = await proxyFetch('gist');
+
+      const marginFile = data.files?.['margin_state.json'];
+      const portfolioFile = data.files?.['portfolio-state.json'];
+      const fileToProcess = marginFile || portfolioFile || Object.values(data.files || {})[0];
+
+      if (!fileToProcess || !fileToProcess.content) {
+        throw new Error('Gist state payload was empty or missing content.');
+      }
+      if (fileToProcess.content === "[object Promise]") {
+        throw new Error('Gist data is corrupted. Please manually fix the Gist in GitHub.');
+      }
+
+      let parsedState = JSON.parse(fileToProcess.content);
+      if (parsedState.payload && typeof parsedState.payload === 'string') {
+        try {
+          parsedState = JSON.parse(atob(parsedState.payload));
+        } catch (e) {
+          console.warn("Failed to decode base64 payload", e);
+        }
+      }
+
+      localStorage.setItem('portfolio_state', JSON.stringify(parsedState));
+      state = { ...state, ...parsedState };
+
+      loadSavedState();
+      renderBoard();
+
+      showToast('Cloud state pulled.', 'success');
+      logTerminal(`[Cloud]: Synced successfully.`);
+      return true;
+    } catch (err) {
+      console.error('Failed to pull cloud state:', err);
+      showToast(`Cloud pull failed: ${err.message}`, 'error');
+      return false;
     }
-
-    // Save to local storage and force a full reload of the application state
-    localStorage.setItem('portfolio_state', JSON.stringify(parsedState));
-
-    // Trigger internal updates
-    state = { ...state, ...parsedState };
-    loadSavedState();
-
-    showToast('Cloud state pulled and applied.', 'success');
-    logTerminal(`[Cloud]: Synced successfully.`);
-
-    return true;
-  } catch (err) {
-    console.error('Failed to pull cloud state:', err);
-    showToast(`Failed to pull cloud state: ${err.message}`, 'error');
-    logTerminal(`[Cloud Error]: Failed to pull from Gist (${err.message})`);
-    return false;
   }
 }
 
@@ -502,22 +522,27 @@ function resetToBlankState() {
 }
 
 async function saveApiKeys() {
-  const secret = document.getElementById("gatewaySecretInput")?.value.trim() || "";
+  const secretEl = document.getElementById("gatewaySecretInput");
+  const secret = secretEl?.value.trim() || "";
 
   if (!secret) {
     showToast("Please enter the Gateway Secret.", "error");
     return;
   }
 
+  secretEl.toggleAttribute('disabled', true);
+
   localStorage.setItem("gateway_secret", secret);
   logTerminal("[System]: Gateway Secret saved.");
   showToast("Gateway unlocked.", "success");
 
-  const success = await pullCloudAndRewriteLocal();
+  const success = await syncCloudState();
   if (success) {
     await refreshAllLivePrices();
     toggleHeaderCredentialsVisibility();
   }
+
+  secretEl.toggleAttribute('disabled', false);
 }
 
 function calcCommission(shares, totalVal) {
@@ -3389,7 +3414,7 @@ async function executeCommand() {
   input.value = "";
 
   if (/^(?:pull|sync cloud|cloud pull|pull cloud|load cloud)$/i.test(text)) {
-    await pullCloudAndRewriteLocal();
+    await syncCloudState();
     return;
   }
 
@@ -3481,19 +3506,21 @@ async function executeCommand() {
   }
 }
 
+function areHeaderCredentialsConfigured() {
+  return (localStorage.getItem('gateway_secret') || '').trim().length > 0;
+}
+
 async function initApp() {
   await loadSavedState();
 
   const savedGateway = localStorage.getItem('gateway_secret');
-  if (savedGateway) {
-    await pullCloudAndRewriteLocal();
-  }
+  if (savedGateway) await syncCloudState();
 
   ['gatewaySecretInput'].forEach(id => {
     document.getElementById(id)?.addEventListener('input', updateHeaderCredentialsVisibility);
   });
 
-  headerCredentialsHidden = localStorage.getItem('gateway_secret')?.length > 0 || localStorage.getItem('header_credentials_hidden') === 'true';
+  headerCredentialsHidden = areHeaderCredentialsConfigured();
 
   const quoteRefreshInterval = document.getElementById('quoteRefreshInterval');
   const savedQuoteRefreshInterval = localStorage.getItem(QUOTE_REFRESH_INTERVAL_KEY);
@@ -3548,7 +3575,7 @@ Object.assign(window, {
   exportBackupJSON,
   importBackupJSON,
   loadMarketInsight,
-  pullCloudAndRewriteLocal,
+  syncCloudState,
   refreshAllLivePrices,
   refreshMarketInsight,
   resetToBlankState,
