@@ -206,7 +206,7 @@ export default {
                 return new Response(JSON.stringify({ error: "Method not allowed." }), { status: 405, headers: corsHeaders });
             }
 
-            // --- DEFAULT ACTION: Yahoo Deep Stock Data & Live Quotes ---
+            // --- DEFAULT ACTION: Yahoo Deep Stock Data & Live Quotes (Group Fetch) ---
             if (!symbol) {
                 return new Response(JSON.stringify({ error: "Missing required 'symbol' or 'action' parameter." }), {
                     status: 400,
@@ -214,64 +214,89 @@ export default {
                 });
             }
 
-            // Obtain session credentials
+            // Support both single "WDC" and grouped "WDC,GOOGL,META"
+            const tickers = symbol.split(',').map(s => s.trim()).filter(s => s);
+
+            if (tickers.length === 0) {
+                return new Response(JSON.stringify({ error: "No valid symbols provided." }), {
+                    status: 400,
+                    headers: corsHeaders
+                });
+            }
+
+            // Obtain session credentials once for the entire batch
             const { cookie, crumb } = await getYahooCredentials();
 
-            const yahooUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=price,summaryDetail,defaultKeyStatistics,financialData,recommendationTrend,upgradeDowngradeHistory,calendarEvents&crumb=${encodeURIComponent(crumb)}`;
+            // Create an array of fetch promises
+            const fetchPromises = tickers.map(async (ticker) => {
+                const yahooUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=price,summaryDetail,defaultKeyStatistics,financialData,recommendationTrend,upgradeDowngradeHistory,calendarEvents&crumb=${encodeURIComponent(crumb)}`;
 
-            const response = await fetch(yahooUrl, {
-                headers: {
-                    "User-Agent": USER_AGENT,
-                    "Cookie": cookie
+                try {
+                    const response = await fetch(yahooUrl, {
+                        headers: {
+                            "User-Agent": USER_AGENT,
+                            "Cookie": cookie
+                        }
+                    });
+
+                    if (!response.ok) {
+                        return { symbol: ticker, error: `Yahoo returned HTTP ${response.status}` };
+                    }
+
+                    const raw = await response.json();
+                    const result = raw.quoteSummary?.result?.[0] || {};
+
+                    return {
+                        symbol: ticker,
+                        price: {
+                            current: result.price?.regularMarketPrice?.raw ?? null,
+                            previousClose: result.price?.regularMarketPreviousClose?.raw ?? null,
+                            change: result.price?.regularMarketChange?.raw ?? null,
+                            changePercent: result.price?.regularMarketChangePercent?.raw ?? null
+                        },
+                        valuation: {
+                            peTrailing: result.summaryDetail?.trailingPE?.raw ?? null,
+                            peForward: result.summaryDetail?.forwardPE?.raw ?? null,
+                            pegRatio: result.defaultKeyStatistics?.pegRatio?.raw ?? null,
+                            shortPercentOfFloat: result.defaultKeyStatistics?.shortPercentOfFloat?.fmt ?? null,
+                            priceToBook: result.defaultKeyStatistics?.priceToBook?.raw ?? null
+                        },
+                        financialHealth: {
+                            profitMargin: result.financialData?.profitMargins?.fmt ?? null,
+                            returnOnEquity: result.financialData?.returnOnEquity?.fmt ?? null,
+                            totalDebt: result.financialData?.totalDebt?.raw ?? null
+                        },
+                        analystTargets: {
+                            mean: result.financialData?.targetMeanPrice?.raw ?? null,
+                            high: result.financialData?.targetHighPrice?.raw ?? null,
+                            low: result.financialData?.targetLowPrice?.raw ?? null,
+                            median: result.financialData?.targetMedianPrice?.raw ?? null,
+                            consensusRecommendation: result.financialData?.recommendationKey ?? null
+                        },
+                        calendar: {
+                            earningsDate: result.calendarEvents?.earnings?.earningsDate?.[0]?.fmt ?? null
+                        },
+                        upgradesDowngrades: (result.upgradeDowngradeHistory?.history || []).slice(0, 5).map(item => ({
+                            firm: item.firm,
+                            toGrade: item.toGrade,
+                            fromGrade: item.fromGrade,
+                            action: item.action
+                        }))
+                    };
+                } catch (err) {
+                    return { symbol: ticker, error: err.message };
                 }
             });
 
-            if (!response.ok) {
-                throw new Error(`Yahoo returned HTTP ${response.status}`);
-            }
+            // Execute all requests concurrently
+            const resultsArray = await Promise.all(fetchPromises);
 
-            const raw = await response.json();
-            const result = raw.quoteSummary?.result?.[0] || {};
+            // If a single ticker was requested, return a single object (backward compatibility)
+            // If multiple were requested, return an array of objects
+            const finalPayload = tickers.length === 1 ? resultsArray[0] : resultsArray;
 
-            const payload = {
-                symbol,
-                price: {
-                    current: result.price?.regularMarketPrice?.raw ?? null,
-                    previousClose: result.price?.regularMarketPreviousClose?.raw ?? null,
-                    change: result.price?.regularMarketChange?.raw ?? null,
-                    changePercent: result.price?.regularMarketChangePercent?.raw ?? null
-                },
-                valuation: {
-                    peTrailing: result.summaryDetail?.trailingPE?.raw ?? null,
-                    peForward: result.summaryDetail?.forwardPE?.raw ?? null,
-                    pegRatio: result.defaultKeyStatistics?.pegRatio?.raw ?? null,
-                    shortPercentOfFloat: result.defaultKeyStatistics?.shortPercentOfFloat?.fmt ?? null,
-                    priceToBook: result.defaultKeyStatistics?.priceToBook?.raw ?? null
-                },
-                financialHealth: {
-                    profitMargin: result.financialData?.profitMargins?.fmt ?? null,
-                    returnOnEquity: result.financialData?.returnOnEquity?.fmt ?? null,
-                    totalDebt: result.financialData?.totalDebt?.raw ?? null
-                },
-                analystTargets: {
-                    mean: result.financialData?.targetMeanPrice?.raw ?? null,
-                    high: result.financialData?.targetHighPrice?.raw ?? null,
-                    low: result.financialData?.targetLowPrice?.raw ?? null,
-                    median: result.financialData?.targetMedianPrice?.raw ?? null,
-                    consensusRecommendation: result.financialData?.recommendationKey ?? null
-                },
-                calendar: {
-                    earningsDate: result.calendarEvents?.earnings?.earningsDate?.[0]?.fmt ?? null
-                },
-                upgradesDowngrades: (result.upgradeDowngradeHistory?.history || []).slice(0, 5).map(item => ({
-                    firm: item.firm,
-                    toGrade: item.toGrade,
-                    fromGrade: item.fromGrade,
-                    action: item.action
-                }))
-            };
-
-            return new Response(JSON.stringify(payload), { headers: corsHeaders });
+            return new Response(JSON.stringify(finalPayload), { headers: corsHeaders });
+            
         } catch (err) {
             return new Response(JSON.stringify({ error: err.message }), {
                 status: 500,

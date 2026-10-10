@@ -2771,7 +2771,6 @@ async function fetchLivePrice(ticker, silent = false) {
 }
 
 async function refreshAllLivePrices() {
-
   const cashHoldings = state.cashCushion && state.cashCushion.holdings;
 
   // 1. Gather all unique active tickers
@@ -2783,58 +2782,66 @@ async function refreshAllLivePrices() {
   const tickersArray = Array.from(allTickers);
   if (tickersArray.length === 0) return;
 
-  logTerminal(`[System]: Polling live quotes for ${tickersArray.join(', ')}...`);
+  const queryStr = tickersArray.join(',');
+  logTerminal(`[System]: Polling batch live quotes for ${queryStr}...`);
 
-  // 2. Fire all requests concurrently via your working single-symbol proxy
-  const fetchPromises = tickersArray.map(async (ticker) => {
-    const data = await fetchYahooStockData(ticker);
-    return { ticker, data };
-  });
+  try {
+    // 2. Fire ONE batch request to the worker
+    const responseData = await fetchYahooStockData(queryStr);
 
-  const results = await Promise.all(fetchPromises);
-  let updatedCount = 0;
+    // Normalize response: Worker returns an object for 1 ticker, or an array for multiple
+    const results = Array.isArray(responseData) ? responseData : [responseData];
+    let updatedCount = 0;
 
-  // 3. Process results, calculate changes, and attach quoteDetails
-  for (const { ticker, data } of results) {
-    if (!data || !data.price) continue;
+    // 3. Process results, calculate changes, and attach quoteDetails
+    for (const data of results) {
+      if (!data || data.error || !data.price) {
+        console.warn(`[Quote Warning]: Missing or failed data for ${data?.symbol}`, data?.error);
+        continue;
+      }
 
-    const current = data.price.current ?? data.regularMarketPrice ?? data.price;
-    const previous = data.price.previousClose ?? data.regularMarketPreviousClose;
-    const change = data.price.change ?? data.regularMarketChange ?? (current - previous);
+      const ticker = data.symbol; // Extracted directly from the backend payload
+      const current = data.price.current ?? data.regularMarketPrice ?? data.price;
+      const previous = data.price.previousClose ?? data.regularMarketPreviousClose;
+      const change = data.price.change ?? data.regularMarketChange ?? (current - previous);
 
-    const quoteDetails = {
-      price: current,
-      change: change,
-      changePercent: previous ? (change / previous) * 100 : 0
-    };
+      const quoteDetails = {
+        price: current,
+        change: change,
+        changePercent: previous ? (change / previous) * 100 : 0
+      };
 
-    // Update Margin Position
-    if (state.positions[ticker]) {
-      state.positions[ticker].currentPrice = current;
-      state.positions[ticker].quoteDetails = quoteDetails;
-      state.positions[ticker].quoteUpdatedAt = Date.now();
-      updatedCount++;
-    }
-
-    // Update Cash/Non-Margin Holdings
-    if (Array.isArray(cashHoldings)) {
-      const cashPos = cashHoldings.find(h => h.ticker === ticker);
-      if (cashPos) {
-        cashPos.currentPrice = current;
-        cashPos.quoteDetails = quoteDetails;
-        cashPos.quoteUpdatedAt = Date.now();
+      // Update Margin Position
+      if (state.positions[ticker]) {
+        state.positions[ticker].currentPrice = current;
+        state.positions[ticker].quoteDetails = quoteDetails;
+        state.positions[ticker].quoteUpdatedAt = Date.now();
         updatedCount++;
       }
-    }
-  }
 
-  // 4. Save and re-render only if data was updated
-  if (updatedCount > 0) {
-    saveState();
-    renderBoard();
-    logTerminal(`[System]: Live market quotes refreshed for ${updatedCount} assets.`);
-  } else {
-    logTerminal(`[Market Data Warning]: Failed to fetch updated quotes.`);
+      // Update Cash/Non-Margin Holdings
+      if (Array.isArray(cashHoldings)) {
+        const cashPos = cashHoldings.find(h => h.ticker === ticker);
+        if (cashPos) {
+          cashPos.currentPrice = current;
+          cashPos.quoteDetails = quoteDetails;
+          cashPos.quoteUpdatedAt = Date.now();
+          updatedCount++;
+        }
+      }
+    }
+
+    // 4. Save and re-render only if data was updated
+    if (updatedCount > 0) {
+      saveState();
+      renderBoard();
+      logTerminal(`[System]: Live market quotes refreshed for ${updatedCount} assets.`);
+    } else {
+      logTerminal(`[Market Data Warning]: No quotes updated during batch fetch.`);
+    }
+  } catch (err) {
+    console.error('Batch quote fetch failed:', err);
+    logTerminal(`[Market Data Error]: Batch fetch failed - ${err.message}`);
   }
 }
 
