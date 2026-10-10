@@ -137,13 +137,6 @@ function decodePayload(str) {
   return JSON.parse(jsonStr);
 }
 
-function extractCleanGistId(rawInput) {
-  if (!rawInput) return "";
-  let trimmed = rawInput.trim();
-  const match = trimmed.match(/([a-f0-9]{20,32})/i);
-  return match ? match[1] : trimmed.replace(/.*gist\.github\.com\/[^/]+\//i, '').replace(/[^a-zA-Z0-9_-]/g, '');
-}
-
 function setGistStatus(status, text) {
   const dot = document.getElementById('cloudStatusDot');
   const label = document.getElementById('cloudStatusText');
@@ -482,21 +475,19 @@ function loadSavedState() {
 let headerCredentialsHidden = false;
 
 function updateHeaderCredentialsVisibility() {
-  const fields = document.getElementById('headerCredentialsFields');
-  const toggleButton = document.getElementById('toggleHeaderCredentialsButton');
-  const saveButton = document.getElementById('saveApiKeysButton');
+  const isConfigured = areHeaderCredentialsConfigured();
+  const fieldsContainer = document.getElementById('headerCredentialsFields');
+  const toggleBtn = document.getElementById('toggleHeaderCredentialsButton');
 
-  fields.classList.toggle('hidden', headerCredentialsHidden);
-  saveButton.classList.toggle('hidden', headerCredentialsHidden);
-  toggleButton.classList.toggle('hidden', !headerCredentialsHidden);
-
-  toggleButton.textContent = headerCredentialsHidden ? 'Show keys' : 'Hide keys';
-  toggleButton.title = headerCredentialsHidden ? 'Show credential inputs' : 'Hide credential inputs';
-  toggleButton.setAttribute('aria-expanded', String(!headerCredentialsHidden));
-
-  const actionButtons = toggleButton.parentElement;
-
-  localStorage.setItem('header_credentials_hidden', String(headerCredentialsHidden));
+  if (isConfigured) {
+    toggleBtn.classList.remove('hidden');
+    fieldsContainer.style.display = headerCredentialsHidden ? 'none' : 'flex';
+    toggleBtn.textContent = headerCredentialsHidden ? 'Show keys' : 'Hide keys';
+  } else {
+    toggleBtn.classList.add('hidden');
+    fieldsContainer.style.display = 'flex';
+    headerCredentialsHidden = false;
+  }
 }
 
 function toggleHeaderCredentialsVisibility() {
