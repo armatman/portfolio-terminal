@@ -447,14 +447,12 @@ async function syncCloudState(mode = 'push') {
 }
 
 function loadSavedState() {
-  // 1. ADD THIS BLOCK to auto-fill the Gist ID:
   const savedGateway = localStorage.getItem('gateway_secret');
   const gatewayInput = document.getElementById('gatewaySecretInput');
   if (savedGateway && gatewayInput) {
     gatewayInput.value = savedGateway;
   }
 
-  // 2. Existing portfolio state loading logic:
   const raw = localStorage.getItem('portfolio_state');
   if (raw) {
     try {
@@ -1453,7 +1451,6 @@ async function fetchBoardAnalystTarget(ticker) {
       const t = data.analystTargets;
       const targetPrice = t?.median || t?.mean || t?.high;
 
-      // If Yahoo returns a valid target, return immediately. Finnhub gets ignored.
       if (typeof targetPrice === "number" && Number.isFinite(targetPrice) && targetPrice > 0) {
         return {
           targetPrice: targetPrice,
@@ -2102,7 +2099,6 @@ async function loadMarketInsight(section, force = false) {
   content.innerHTML = '<div class="py-4 text-center text-xs text-slate-500 font-mono animate-pulse">Loading live data...</div>';
 
   try {
-    // --- TAB 1: NEWS (Routed through Worker) ---
     if (section === 'news') {
       const res = await fetch(`${YAHOO_PROXY_URL}?action=news&symbol=${encodeURIComponent(ticker)}`, {
         method: 'POST',
@@ -2128,7 +2124,6 @@ async function loadMarketInsight(section, force = false) {
       return;
     }
 
-    // --- TABS 2, 3, 4: YAHOO DATA VIA WORKER ---
     const res = await fetch(`${YAHOO_PROXY_URL}?symbol=${encodeURIComponent(ticker)}`, {
       method: 'POST',
       headers: {
@@ -2492,9 +2487,6 @@ function renderSingleAssetView(pos) {
   const dailyQuoteLabel = createDailyQuoteLabel(pos.quoteDetails);
   boardDailyQuote.textContent = dailyQuoteLabel?.textContent || '';
   boardDailyQuote.className = dailyQuoteLabel?.className || 'block text-[10px] text-slate-500';
-  const dailyChange = Number.isFinite(pos.quoteDetails?.change)
-    ? pos.quoteDetails.change * pos.shares
-    : Number.NaN;
 
   renderBoardAnalystConsensus(pos.ticker);
 
@@ -2773,7 +2765,6 @@ async function fetchLivePrice(ticker, silent = false) {
 async function refreshAllLivePrices() {
   const cashHoldings = state.cashCushion && state.cashCushion.holdings;
 
-  // 1. Gather all unique active tickers
   const allTickers = new Set([
     ...Object.keys(state.positions || {}),
     ...(cashHoldings || []).map(h => h.ticker)
@@ -2786,21 +2777,17 @@ async function refreshAllLivePrices() {
   logTerminal(`[System]: Polling batch live quotes for ${queryStr}...`);
 
   try {
-    // 2. Fire ONE batch request to the worker
     const responseData = await fetchYahooStockData(queryStr);
-
-    // Normalize response: Worker returns an object for 1 ticker, or an array for multiple
     const results = Array.isArray(responseData) ? responseData : [responseData];
     let updatedCount = 0;
 
-    // 3. Process results, calculate changes, and attach quoteDetails
     for (const data of results) {
       if (!data || data.error || !data.price) {
         console.warn(`[Quote Warning]: Missing or failed data for ${data?.symbol}`, data?.error);
         continue;
       }
 
-      const ticker = data.symbol; // Extracted directly from the backend payload
+      const ticker = data.symbol;
       const current = data.price.current ?? data.regularMarketPrice ?? data.price;
       const previous = data.price.previousClose ?? data.regularMarketPreviousClose;
       const change = data.price.change ?? data.regularMarketChange ?? (current - previous);
@@ -2811,7 +2798,6 @@ async function refreshAllLivePrices() {
         changePercent: previous ? (change / previous) * 100 : 0
       };
 
-      // Update Margin Position
       if (state.positions[ticker]) {
         state.positions[ticker].currentPrice = current;
         state.positions[ticker].quoteDetails = quoteDetails;
@@ -2819,7 +2805,6 @@ async function refreshAllLivePrices() {
         updatedCount++;
       }
 
-      // Update Cash/Non-Margin Holdings
       if (Array.isArray(cashHoldings)) {
         const cashPos = cashHoldings.find(h => h.ticker === ticker);
         if (cashPos) {
@@ -2831,7 +2816,6 @@ async function refreshAllLivePrices() {
       }
     }
 
-    // 4. Save and re-render only if data was updated
     if (updatedCount > 0) {
       saveState();
       renderBoard();
@@ -3157,22 +3141,11 @@ async function applyPortfolioActions(action) {
     });
     pos.commBuy += buyComm;
     pos.currentPrice = price;
-    pos.quoteDetails = {
-      price: pos.currentPrice,
-      // Make sure to use whatever variable names you have in this block for change/prevClose
-      change: change,
-      changePercent: prevClose ? (change / prevClose) * 100 : 0
-    };
-
     pos.quoteSource = 'Trade input';
-    const prevClose = data.price?.previousClose ?? data.regularMarketPreviousClose ?? data.previousClose;
-    const change = data.price?.change ?? data.regularMarketChange ?? (pos.currentPrice - prevClose);
-
     delete pos.quoteUpdatedAt;
     delete pos.quoteDetails;
     if (action.pt) pos.pt = Number(action.pt);
 
-    // 1. Consume Free Cash first
     const currentFreeCash = Number(state.cashCushion?.freeCash) || 0;
     const cashUsed = Math.min(currentFreeCash, totalOutlay);
     const debtAdded = totalOutlay - cashUsed;
@@ -3181,7 +3154,6 @@ async function applyPortfolioActions(action) {
       state.cashCushion.freeCash = currentFreeCash - cashUsed;
     }
 
-    // 2. Only the remaining unpaid portion increases margin debt
     state.marginBalance = state.marginBalance - debtAdded;
     state.activeView = ticker;
 
@@ -3195,7 +3167,6 @@ async function applyPortfolioActions(action) {
     let isCashHolding = false;
     let cashHoldingIdx = -1;
 
-    // Check if closing a cash-held stock instead of a margin position
     if (!pos && state.cashCushion && state.cashCushion.holdings) {
       cashHoldingIdx = state.cashCushion.holdings.findIndex(h => h.ticker === ticker);
       if (cashHoldingIdx !== -1) {
@@ -3233,7 +3204,6 @@ async function applyPortfolioActions(action) {
     const sellComm = calcCommission(sharesToSell, grossProceeds);
     const netCashCredited = grossProceeds - sellComm;
 
-    // 1. Pay down existing margin debt first
     const currentDebt = Math.abs(state.marginBalance);
     let debtRepaid = 0;
     let cashSurplus = 0;
@@ -3246,7 +3216,6 @@ async function applyPortfolioActions(action) {
       cashSurplus = netCashCredited;
     }
 
-    // 2. Overflow proceeds automatically replenish Free Uninvested Cash
     if (cashSurplus > 0) {
       if (!state.cashCushion) state.cashCushion = { freeCash: 0.00, holdings: [] };
       state.cashCushion.freeCash = (Number(state.cashCushion.freeCash) || 0) + cashSurplus;
@@ -3457,7 +3426,6 @@ async function executeCommand() {
 
     document.getElementById("aiStatus").innerText = "PARSING...";
 
-    // Route prompt through Worker proxy
     const res = await fetch(`${YAHOO_PROXY_URL}?action=gemini`, {
       method: "POST",
       headers: { "Content-Type": "application/json", 'X-App-Auth': localStorage.getItem("gateway_secret") || "" },
@@ -3545,11 +3513,9 @@ async function initApp() {
   updateHeaderCredentialsVisibility();
   document.getElementById('mainDeskContainer')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-  // Initial render from local/gist state, then pull live quotes
   renderBoard();
   await refreshAllLivePrices();
 
-  // Background refresh triggers
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       refreshAllLivePrices();
