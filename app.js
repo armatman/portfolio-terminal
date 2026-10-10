@@ -157,7 +157,7 @@ function setGistStatus(status, text) {
 }
 
 async function pushStateToGist(forceImmediate = false) {
-  const gistId = extractCleanGistId(localStorage.getItem('github_gist_id'));
+  const gistId = localStorage.getItem('github_gist_id');
   const token = (localStorage.getItem('github_pat_token') || '').trim();
   if (!gistId || !token) {
     const missing = [];
@@ -247,7 +247,7 @@ function applyProviderKeys(keys) {
 }
 
 async function saveProviderKeysToGist(keys, geminiKey) {
-  const gistId = extractCleanGistId(localStorage.getItem('github_gist_id'));
+  const gistId = localStorage.getItem('github_gist_id');
   const token = (localStorage.getItem('github_pat_token') || '').trim();
   if (!gistId || !token) return false;
   if (!geminiKey.trim()) {
@@ -311,7 +311,7 @@ async function restoreProviderKeysFromGistFile(file) {
 }
 
 async function pullStateFromGistOnLoad() {
-  const gistId = extractCleanGistId(localStorage.getItem('github_gist_id'));
+  const gistId = localStorage.getItem('github_gist_id');
   const token = (localStorage.getItem('github_pat_token') || '').trim();
   if (!gistId) return false;
 
